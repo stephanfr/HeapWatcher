@@ -13,7 +13,6 @@ namespace SEFUtils::HeapWatcher
     class HighLevelStatistics
     {
        public:
-
         HighLevelStatistics(const HighLevelStatistics& stats_to_copy)
             : number_of_mallocs_(stats_to_copy.number_of_mallocs_),
               number_of_reallocs_(stats_to_copy.number_of_reallocs_),
@@ -105,9 +104,8 @@ namespace SEFUtils::HeapWatcher
     class HeapSnapshot
     {
        public:
-
         HeapSnapshot() = delete;
-        HeapSnapshot( const HeapSnapshot& ) = delete;
+        HeapSnapshot(const HeapSnapshot&) = delete;
 
         HeapSnapshot(HeapSnapshot&& snapshot_to_move)
             : high_level_statistics_(snapshot_to_move.high_level_statistics_),
@@ -115,7 +113,7 @@ namespace SEFUtils::HeapWatcher
         {
         }
 
-        HeapSnapshot&     operator=( const HeapSnapshot& ) = delete;
+        HeapSnapshot& operator=(const HeapSnapshot&) = delete;
 
         [[nodiscard]] HighLevelStatistics high_level_statistics() const { return high_level_statistics_; }
 
@@ -137,15 +135,50 @@ namespace SEFUtils::HeapWatcher
         friend class HeapWatcherImpl;
     };
 
+    class PauseThreadWatchToken
+    {
+        public :
+
+        virtual ~PauseThreadWatchToken() {};
+
+        protected :
+
+        PauseThreadWatchToken() {};
+        PauseThreadWatchToken( const PauseThreadWatchToken& ) = delete;
+        PauseThreadWatchToken( PauseThreadWatchToken&& ) = delete;
+    };
+
+
+    class PauseThreadWatchGuard
+    {
+       public:
+        PauseThreadWatchGuard() = delete;
+        PauseThreadWatchGuard(const PauseThreadWatchGuard&) = delete;
+
+        PauseThreadWatchGuard(std::unique_ptr<PauseThreadWatchToken> token) : token_(token.release()) {}
+
+        PauseThreadWatchGuard(PauseThreadWatchGuard&& guard_to_move) : token_(guard_to_move.token_.release()) {}
+
+        ~PauseThreadWatchGuard() {}
+
+       private:
+        std::unique_ptr<PauseThreadWatchToken> token_;
+    };
+
     class HeapWatcher
     {
        public:
+
         virtual void start_watching() = 0;
         virtual const HeapSnapshot stop_watching() = 0;
+
+        [[nodiscard]] virtual PauseThreadWatchGuard   pause_watching_this_thread() = 0;
 
         [[nodiscard]] virtual const HeapSnapshot snapshot() = 0;
         [[nodiscard]] virtual const HighLevelStatistics high_level_stats() = 0;
     };
+
+
 
     HeapWatcher& get_heap_watcher();
 

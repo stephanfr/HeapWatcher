@@ -78,7 +78,10 @@ namespace SEFUtils::HeapWatcher
 
         static WorkerRequest free_request(void* address) { return WorkerRequest(address); }
 
-        static WorkerRequest clear_allocation_map() { return WorkerRequest(WorkerOperation::CLEAR_ALLOCATION_MAP); }
+        static WorkerRequest clear_allocation_map(std::promise<void>& clear_allocations_promise)
+        {
+            return WorkerRequest(clear_allocations_promise);
+        }
 
         static WorkerRequest snapshot_request(std::promise<HeapSnapshot>& snapshot_promise)
         {
@@ -108,15 +111,11 @@ namespace SEFUtils::HeapWatcher
 
         void* block_to_free() { return block_to_free_; }
 
-        std::promise<HeapSnapshot>& allocation_snapshot_promise()
-        {
-            return allocation_snapshot_promise_;
-        }
+        std::promise<void>& clear_allocations_promise() { return clear_allocations_promise_; }
 
-        std::promise<HighLevelStatistics>& high_level_statistics_promise()
-        {
-            return high_level_statistics_promise_;
-        }
+        std::promise<HeapSnapshot>& allocation_snapshot_promise() { return allocation_snapshot_promise_; }
+
+        std::promise<HighLevelStatistics>& high_level_statistics_promise() { return high_level_statistics_promise_; }
 
        private:
         WorkerOperation operation_;
@@ -125,6 +124,7 @@ namespace SEFUtils::HeapWatcher
             AllocationRecord allocation_record_;
             ReallocRecord realloc_record_;
             void* block_to_free_;
+            std::reference_wrapper<std::promise<void>> clear_allocations_promise_;
             std::reference_wrapper<std::promise<HeapSnapshot>> allocation_snapshot_promise_;
             std::reference_wrapper<std::promise<HighLevelStatistics>> high_level_statistics_promise_;
         };
@@ -143,6 +143,11 @@ namespace SEFUtils::HeapWatcher
 
         WorkerRequest(void* address) : operation_(WorkerOperation::FREE_REQUEST), block_to_free_(address) {}
 
+        WorkerRequest(std::promise<void>& clear_allocations_promise)
+            : operation_(WorkerOperation::CLEAR_ALLOCATION_MAP), clear_allocations_promise_(clear_allocations_promise)
+        {
+        }
+
         WorkerRequest(std::promise<HeapSnapshot>& snapshot_promise)
             : operation_(WorkerOperation::GET_ALLOCATION_SNAPSHOT), allocation_snapshot_promise_(snapshot_promise)
         {
@@ -152,7 +157,6 @@ namespace SEFUtils::HeapWatcher
             : operation_(WorkerOperation::GET_HIGH_LEVEL_STATS), high_level_statistics_promise_(stats_promise)
         {
         }
-
     };
 
     class HeapWatcherImpl : public HeapWatcher
@@ -184,9 +188,22 @@ namespace SEFUtils::HeapWatcher
 
         void start_watching() final
         {
-            watching_globally_ = false;
+            if (watching_globally_)
+            {
+                return;
+            }
 
-            worker_request_queue_.enqueue(WorkerRequest::clear_allocation_map());
+            //  Scoping below is to insure automatic variables are destroyed before global
+            //      watching is set true again.
+
+            {
+                std::promise<void> clear_allocations_promise;
+                std::future<void> clear_allocations_future = clear_allocations_promise.get_future();
+
+                worker_request_queue_.enqueue(WorkerRequest::clear_allocation_map(clear_allocations_promise));
+
+                clear_allocations_future.wait();
+            }
 
             watching_globally_ = true;
         }
@@ -200,27 +217,42 @@ namespace SEFUtils::HeapWatcher
 
             worker_request_queue_.enqueue(WorkerRequest::snapshot_request(snapshot_promise));
 
-            return std::move( snapshot_future.get() );
+            return std::move(snapshot_future.get());
+        }
+
+        PauseThreadWatchGuard pause_watching_this_thread()
+        {
+            bool current_thread_watch_value = watching_thread_;
+
+            watching_thread_ = false;
+
+            std::unique_ptr<PauseThreadWatchToken> token(new PauseThreadWatchToken(current_thread_watch_value));
+
+            return (std::move(PauseThreadWatchGuard(std::move(token))));
         }
 
         const HeapSnapshot snapshot() final
         {
+            PauseThreadWatchToken pause_watching_guard;
+
             std::promise<HeapSnapshot> snapshot_promise;
             std::future<HeapSnapshot> snapshot_future = snapshot_promise.get_future();
 
             worker_request_queue_.enqueue(WorkerRequest::snapshot_request(snapshot_promise));
 
-            return snapshot_future.get();
+            return std::move(snapshot_future.get());
         }
 
         const HighLevelStatistics high_level_stats() final
         {
+            PauseThreadWatchToken pause_watching_guard;
+
             std::promise<HighLevelStatistics> stats_promise;
             std::future<HighLevelStatistics> stats_future = stats_promise.get_future();
 
             worker_request_queue_.enqueue(WorkerRequest::high_level_statistics_request(stats_promise));
 
-            return std::move( stats_future.get() );
+            return std::move(stats_future.get());
         }
 
         void* instrumented_malloc(size_t size)
@@ -229,7 +261,7 @@ namespace SEFUtils::HeapWatcher
 
             if (is_watching_this_thread())
             {
-                watching_thread_ = false;
+                PauseThreadWatchToken pause_watching_guard;
 
                 std::array<void*, SEFUtils::HeapWatcher::MAX_CALLSTACK_RETAINED + 2> stack_tail;
                 stack_tail.fill(nullptr);
@@ -237,8 +269,6 @@ namespace SEFUtils::HeapWatcher
                 backtrace(stack_tail.data(), SEFUtils::HeapWatcher::MAX_CALLSTACK_RETAINED + 2);
 
                 worker_request_queue_.enqueue(WorkerRequest::malloc_request(size, address, stack_tail.data() + 2));
-
-                watching_thread_ = true;
             }
 
             return address;
@@ -250,36 +280,32 @@ namespace SEFUtils::HeapWatcher
 
             if (is_watching_this_thread())
             {
-                watching_thread_ = false;
+                PauseThreadWatchToken pause_watching_guard;
 
                 worker_request_queue_.enqueue(WorkerRequest::realloc_request(original_address, new_address, new_size));
-
-                watching_thread_ = true;
             }
 
             return new_address;
         }
 
-        void* instrumented_free(void* address)
+        void instrumented_free(void* address)
         {
             __libc_free(address);
 
             if (is_watching_this_thread())
             {
-                watching_thread_ = false;
+                PauseThreadWatchToken pause_watching_guard;
 
                 worker_request_queue_.enqueue(WorkerRequest::free_request(address));
-
-                watching_thread_ = true;
             }
-
-            return address;
         }
 
        private:
         std::atomic_bool watching_globally_{false};
 
         thread_local static bool watching_thread_;
+
+        friend class PauseThreadWatchToken;
 
         moodycamel::BlockingConcurrentQueue<WorkerRequest> worker_request_queue_;
 
@@ -295,38 +321,73 @@ namespace SEFUtils::HeapWatcher
         uint64_t bytes_allocated_{0};
         uint64_t bytes_freed_{0};
 
-        void worker_main()
+        class PauseThreadWatchToken : public SEFUtils::HeapWatcher::PauseThreadWatchToken
         {
-            constexpr size_t MAX_REQUESTS_TO_DEQUEUE = 10;
+           public:
+            PauseThreadWatchToken() : saved_value_(watching_thread_) { watching_thread_ = false; }
+            PauseThreadWatchToken(bool saved_value) : saved_value_(saved_value) { watching_thread_ = false; }
 
-            watching_thread_ = false;
-            worker_thread_running_ = true;
+            ~PauseThreadWatchToken() { watching_thread_ = saved_value_; }
 
-            std::array<WorkerRequest, MAX_REQUESTS_TO_DEQUEUE> requests;
+           private:
+            const bool saved_value_;
+        };
 
-            while (worker_thread_running_)
+        //
+        //  'Main' function for tracking allocations
+        //
+
+        void worker_main();
+    };
+
+    //
+    //  Globals
+    //
+
+    HeapWatcherImpl heap_watcher_;
+    thread_local bool HeapWatcherImpl::watching_thread_{true};
+
+    HeapWatcher& get_heap_watcher() { return heap_watcher_; }
+
+    //
+    //  HeapWatcherImpl implementation
+    //
+
+    void HeapWatcherImpl::worker_main()
+    {
+        constexpr size_t MAX_REQUESTS_TO_DEQUEUE = 10;
+
+        watching_thread_ = false;
+        worker_thread_running_ = true;
+
+        std::array<WorkerRequest, MAX_REQUESTS_TO_DEQUEUE> requests;
+
+        while (worker_thread_running_)
+        {
+            int num_requests =
+                worker_request_queue_.wait_dequeue_bulk_timed(requests.data(), MAX_REQUESTS_TO_DEQUEUE, 0.5s);
+
+            for (int i = 0; i < num_requests; i++)
             {
-                int num_requests =
-                    worker_request_queue_.wait_dequeue_bulk_timed(requests.data(), MAX_REQUESTS_TO_DEQUEUE, 0.5s);
-
-                for (int i = 0; i < num_requests; i++)
+                switch (requests[i].operation())
                 {
-                    switch (requests[i].operation())
+                    case WorkerOperation::MALLOC_REQUEST:
                     {
-                        case WorkerOperation::MALLOC_REQUEST:
-                        {
-                            number_of_mallocs_++;
-                            bytes_allocated_ += requests[i].allocation_record().size();
+                        number_of_mallocs_++;
+                        bytes_allocated_ += requests[i].allocation_record().size();
 
-                            allocations_.emplace(requests[i].allocation_record().address(),
-                                                 requests[i].allocation_record());
-                        }
-                        break;
+                        allocations_.emplace(requests[i].allocation_record().address(),
+                                             requests[i].allocation_record());
+                    }
+                    break;
 
-                        case WorkerOperation::REALLOC_REQUEST:
+                    case WorkerOperation::REALLOC_REQUEST:
+                    {
+                        number_of_reallocs_++;
+                        auto record = allocations_.find(requests[i].realloc_record().original_address_);
+
+                        if (record != allocations_.end())
                         {
-                            number_of_reallocs_++;
-                            auto record = allocations_.find(requests[i].realloc_record().original_address_);
                             bytes_allocated_ -= record->second.size();
                             bytes_allocated_ += requests[i].realloc_record().new_size_;
 
@@ -338,67 +399,72 @@ namespace SEFUtils::HeapWatcher
 
                             allocations_.emplace(revised_record.address(), revised_record);
                         }
-                        break;
-
-                        case WorkerOperation::FREE_REQUEST:
+                        else
                         {
-                            number_of_frees_++;
-                            auto record = allocations_.find(requests[i].block_to_free());
-                            bytes_freed_ += record->second.size();
+                            AllocationRecord allocation_record(
+                                requests[i].realloc_record().new_size_, requests[i].realloc_record().new_address_,
+                                record->second.txn_id(), record->second.raw_stack_trace().data());
 
-                            allocations_.erase(record);
+                            allocations_.emplace(requests[i].realloc_record().new_address_, allocation_record);
                         }
-                        break;
-
-                        case WorkerOperation::CLEAR_ALLOCATION_MAP:
-                        {
-                            number_of_mallocs_ = 0;
-                            number_of_reallocs_ = 0;
-                            number_of_frees_ = 0;
-                            bytes_allocated_ = 0;
-                            bytes_freed_ = 0;
-                            
-                            allocations_.clear();
-                        }
-                        break;
-
-                        case WorkerOperation::GET_ALLOCATION_SNAPSHOT:
-                        {
-                            std::unique_ptr<AllocationVector> snapshot(new AllocationVector());
-
-                            snapshot->reserve(allocations_.size());
-
-                            for (const auto& entry : allocations_)
-                            {
-                                snapshot->emplace_back(entry.second);
-                            }
-
-                            requests[i].allocation_snapshot_promise().set_value(
-                                HeapSnapshot( number_of_mallocs_, number_of_reallocs_, number_of_frees_, bytes_allocated_, bytes_freed_, snapshot ));
-                        }
-                        break;
-
-                        case WorkerOperation::GET_HIGH_LEVEL_STATS :
-                        {
-                            requests[i].high_level_statistics_promise().set_value(
-                                HighLevelStatistics( number_of_mallocs_, number_of_reallocs_, number_of_frees_, bytes_allocated_, bytes_freed_ ));
-                        }
-                        break;
                     }
+                    break;
+
+                    case WorkerOperation::FREE_REQUEST:
+                    {
+                        number_of_frees_++;
+                        auto iterator = allocations_.find(requests[i].block_to_free());
+
+                        if (iterator != allocations_.end())
+                        {
+                            bytes_freed_ += iterator->second.size();
+                            allocations_.erase(iterator);
+                        }
+                    }
+                    break;
+
+                    case WorkerOperation::CLEAR_ALLOCATION_MAP:
+                    {
+                        number_of_mallocs_ = 0;
+                        number_of_reallocs_ = 0;
+                        number_of_frees_ = 0;
+                        bytes_allocated_ = 0;
+                        bytes_freed_ = 0;
+
+                        allocations_.clear();
+                        requests[i].clear_allocations_promise().set_value();
+                    }
+                    break;
+
+                    case WorkerOperation::GET_ALLOCATION_SNAPSHOT:
+                    {
+                        std::unique_ptr<AllocationVector> snapshot(new AllocationVector());
+
+                        snapshot->reserve(allocations_.size());
+
+                        for (const auto& entry : allocations_)
+                        {
+                            snapshot->emplace_back(entry.second);
+                        }
+
+                        requests[i].allocation_snapshot_promise().set_value(
+                            HeapSnapshot(number_of_mallocs_, number_of_reallocs_, number_of_frees_, bytes_allocated_,
+                                         bytes_freed_, snapshot));
+                    }
+                    break;
+
+                    case WorkerOperation::GET_HIGH_LEVEL_STATS:
+                    {
+                        requests[i].high_level_statistics_promise().set_value(HighLevelStatistics(
+                            number_of_mallocs_, number_of_reallocs_, number_of_frees_, bytes_allocated_, bytes_freed_));
+                    }
+                    break;
                 }
             }
         }
-    };
+    }
 
-    //
-    //  Globals
-    //
-
-    HeapWatcherImpl heap_watcher_;
-    thread_local bool HeapWatcherImpl::watching_thread_{true};
-
-    HeapWatcher& get_heap_watcher() { return heap_watcher_; }
-}  // namespace SEFUtils::MemoryWatcher
+}  // namespace SEFUtils::HeapWatcher
 
 //
 //  Overrides of the C heap functions follow

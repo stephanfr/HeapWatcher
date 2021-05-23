@@ -7,6 +7,8 @@ namespace SEFUtils::HeapWatcher
 {
     const std::vector<ModuleFunctionOffset> AllocationRecord::stack_trace() const
     {
+        PauseThreadWatchGuard   pause_watching_guard( std::move( get_heap_watcher().pause_watching_this_thread() ));
+
         std::vector<ModuleFunctionOffset> tail_records;
 
         tail_records.reserve( MAX_CALLSTACK_RETAINED );
