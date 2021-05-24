@@ -221,7 +221,7 @@ namespace SEFUtils::HeapWatcher
 
     void HeapWatcherImpl::worker_main()
     {
-        constexpr size_t MAX_REQUESTS_TO_DEQUEUE = 10;
+        constexpr size_t MAX_REQUESTS_TO_DEQUEUE = 20;
 
         watching_thread_ = false;
         worker_thread_running_ = true;
