@@ -13,14 +13,14 @@ namespace SEFUtils::HeapWatcher
     class HighLevelStatistics
     {
        public:
-        HighLevelStatistics(const HighLevelStatistics& stats_to_copy)
-            : number_of_mallocs_(stats_to_copy.number_of_mallocs_),
-              number_of_reallocs_(stats_to_copy.number_of_reallocs_),
-              number_of_frees_(stats_to_copy.number_of_frees_),
-              bytes_allocated_(stats_to_copy.bytes_allocated_),
-              bytes_freed_(stats_to_copy.bytes_freed_)
-        {
-        }
+        HighLevelStatistics(const HighLevelStatistics& stats_to_copy) = default;
+
+        HighLevelStatistics(HighLevelStatistics&& stats_to_move) = default;
+
+        ~HighLevelStatistics() = default;
+
+        HighLevelStatistics& operator=(const HighLevelStatistics&) = delete;
+        HighLevelStatistics& operator=(HighLevelStatistics&&) = delete;
 
         [[nodiscard]] uint64_t number_of_mallocs() const { return number_of_mallocs_; }
         [[nodiscard]] uint64_t number_of_reallocs() const { return number_of_reallocs_; }
@@ -54,8 +54,8 @@ namespace SEFUtils::HeapWatcher
     class ModuleFunctionOffset
     {
        public:
-        ModuleFunctionOffset(const std::string& module, const std::string& function, const std::string& offset)
-            : module_(module), function_(function), offset_(offset)
+        ModuleFunctionOffset(std::string module, std::string function, std::string offset)
+            : module_(std::move(module)), function_(std::move(function)), offset_(std::move(offset))
         {
         }
 
@@ -77,7 +77,7 @@ namespace SEFUtils::HeapWatcher
         [[nodiscard]] size_t size() const { return size_; }
         [[nodiscard]] void* address() const { return address_; }
         [[nodiscard]] uint64_t txn_id() const { return txn_id_; }
-        [[nodiscard]] const std::array<void*, MAX_CALLSTACK_RETAINED> raw_stack_trace() const { return stack_tail_; }
+        [[nodiscard]] const std::array<void*, MAX_CALLSTACK_RETAINED>& raw_stack_trace() const { return stack_tail_; }
 
         [[nodiscard]] const std::vector<ModuleFunctionOffset> stack_trace() const;
 
@@ -87,6 +87,7 @@ namespace SEFUtils::HeapWatcher
         uint64_t txn_id_;
         std::array<void*, MAX_CALLSTACK_RETAINED> stack_tail_;
 
+        //  NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init, hicpp-member-init)
         AllocationRecord(size_t size, void* address, uint32_t txn_id, void* const* stack_tail)
             : size_(size), address_(address), txn_id_(txn_id)
         {
@@ -107,13 +108,16 @@ namespace SEFUtils::HeapWatcher
         HeapSnapshot() = delete;
         HeapSnapshot(const HeapSnapshot&) = delete;
 
-        HeapSnapshot(HeapSnapshot&& snapshot_to_move)
+        HeapSnapshot(HeapSnapshot&& snapshot_to_move) noexcept
             : high_level_statistics_(snapshot_to_move.high_level_statistics_),
               open_allocations_(std::move(snapshot_to_move.open_allocations_))
         {
         }
 
+        ~HeapSnapshot() = default;
+
         HeapSnapshot& operator=(const HeapSnapshot&) = delete;
+        HeapSnapshot& operator=(HeapSnapshot&&) = delete;
 
         [[nodiscard]] HighLevelStatistics high_level_statistics() const { return high_level_statistics_; }
 
@@ -122,7 +126,7 @@ namespace SEFUtils::HeapWatcher
        private:
         HeapSnapshot(uint64_t number_of_mallocs, uint64_t number_of_reallocs, uint64_t number_of_frees,
                      uint64_t bytes_allocated, uint64_t bytes_freed,
-                     std::unique_ptr<AllocationVector>& open_allocations)
+                     std::unique_ptr<AllocationVector>& open_allocations)  // NOLINT(google-runtime-references)
             : high_level_statistics_(number_of_mallocs, number_of_reallocs, number_of_frees, bytes_allocated,
                                      bytes_freed),
               open_allocations_(open_allocations.release())
@@ -130,36 +134,41 @@ namespace SEFUtils::HeapWatcher
         }
 
         HighLevelStatistics high_level_statistics_;
-        std::unique_ptr<AllocationVector> open_allocations_;
+        std::unique_ptr<const AllocationVector> open_allocations_;
 
         friend class HeapWatcherImpl;
     };
 
     class PauseThreadWatchToken
     {
-        public :
+       public:
+        PauseThreadWatchToken(const PauseThreadWatchToken&) = delete;
+        PauseThreadWatchToken(PauseThreadWatchToken&&) = delete;
+        PauseThreadWatchToken& operator=(const PauseThreadWatchToken&) = delete;
+        PauseThreadWatchToken& operator=(PauseThreadWatchToken&&) = delete;
 
-        virtual ~PauseThreadWatchToken() {};
+        virtual ~PauseThreadWatchToken() = default;
 
-        protected :
-
-        PauseThreadWatchToken() {};
-        PauseThreadWatchToken( const PauseThreadWatchToken& ) = delete;
-        PauseThreadWatchToken( PauseThreadWatchToken&& ) = delete;
+       protected:
+        PauseThreadWatchToken() = default;
     };
-
 
     class PauseThreadWatchGuard
     {
        public:
         PauseThreadWatchGuard() = delete;
-        PauseThreadWatchGuard(const PauseThreadWatchGuard&) = delete;
+        explicit PauseThreadWatchGuard(const PauseThreadWatchGuard&) = delete;
 
-        PauseThreadWatchGuard(std::unique_ptr<PauseThreadWatchToken> token) : token_(token.release()) {}
+        explicit PauseThreadWatchGuard(std::unique_ptr<PauseThreadWatchToken> token) : token_(token.release()) {}
 
-        PauseThreadWatchGuard(PauseThreadWatchGuard&& guard_to_move) : token_(guard_to_move.token_.release()) {}
+        PauseThreadWatchGuard(PauseThreadWatchGuard&& guard_to_move) noexcept : token_(guard_to_move.token_.release())
+        {
+        }
 
-        ~PauseThreadWatchGuard() {}
+        ~PauseThreadWatchGuard() = default;
+
+        PauseThreadWatchGuard& operator=(const PauseThreadWatchGuard&) = delete;
+        PauseThreadWatchGuard& operator=(PauseThreadWatchGuard&&) = delete;
 
        private:
         std::unique_ptr<PauseThreadWatchToken> token_;
@@ -168,17 +177,14 @@ namespace SEFUtils::HeapWatcher
     class HeapWatcher
     {
        public:
-
         virtual void start_watching() = 0;
         virtual const HeapSnapshot stop_watching() = 0;
 
-        [[nodiscard]] virtual PauseThreadWatchGuard   pause_watching_this_thread() = 0;
+        [[nodiscard]] virtual PauseThreadWatchGuard pause_watching_this_thread() = 0;
 
         [[nodiscard]] virtual const HeapSnapshot snapshot() = 0;
         [[nodiscard]] virtual const HighLevelStatistics high_level_stats() = 0;
     };
-
-
 
     HeapWatcher& get_heap_watcher();
 

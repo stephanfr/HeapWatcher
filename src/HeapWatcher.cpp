@@ -1,5 +1,4 @@
 #include "HeapWatcher.hpp"
-#include "WorkerRequest.hpp"
 
 #include <execinfo.h>
 
@@ -13,6 +12,7 @@
 #include <map>
 #include <memory>
 
+#include "WorkerRequest.hpp"
 #include "blockingconcurrentqueue.h"
 
 using namespace std::literals::chrono_literals;

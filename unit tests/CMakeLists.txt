@@ -11,7 +11,7 @@ include(GoogleTest)
 
 
 find_package(Catch2 REQUIRED)
-add_executable(tests BasicTests.cpp)
+add_executable(tests BasicTests.cpp TestFixtureTests.cpp TestWorkloads.cpp)
 target_include_directories( tests PRIVATE ../include ../src )
 target_link_libraries(tests PRIVATE Catch2::Catch2WithMain HeapWatcher )
 
