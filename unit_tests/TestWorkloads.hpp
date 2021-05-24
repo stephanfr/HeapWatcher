@@ -6,5 +6,5 @@ void OneLeakNested();
 void NoLeaksWithRealloc();
 void OneLeakWithRealloc();
 void BuildBigMap();
-void RandomHeapOperations();
+void RandomHeapOperations( long num_operations );
 

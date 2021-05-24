@@ -42,7 +42,7 @@ TEST_CASE("Basic HeapWatrcher Tests", "[basic]")
         REQUIRE(leaks.high_level_statistics().bytes_allocated() == sizeof(int));
         REQUIRE(leaks.high_level_statistics().bytes_freed() == sizeof(int));
     }
-/*
+
     SECTION("One Leak", "[basic]")
     {
         //  Now, one leak
@@ -143,9 +143,11 @@ TEST_CASE("Basic HeapWatrcher Tests", "[basic]")
 
     SECTION("Many Random Heap Operations No Leaks", "[basic]")
     {
+        constexpr long      num_operations = 1000000;
+
         SEFUtils::HeapWatcher::get_heap_watcher().start_watching();
 
-        RandomHeapOperations();
+        RandomHeapOperations(num_operations);
 
         auto leaks(SEFUtils::HeapWatcher::get_heap_watcher().stop_watching());
 
@@ -154,9 +156,11 @@ TEST_CASE("Basic HeapWatrcher Tests", "[basic]")
 
     SECTION("Insure getting snapshot does not leak", "[basic]")
     {
+        constexpr long      num_operations = 1000000;
+
         SEFUtils::HeapWatcher::get_heap_watcher().start_watching();
 
-        std::thread heap_loading_thread(RandomHeapOperations);
+        std::thread heap_loading_thread(RandomHeapOperations, num_operations);
 
         for (int i = 0; i < 5; i++)
         {
@@ -174,13 +178,15 @@ TEST_CASE("Basic HeapWatrcher Tests", "[basic]")
 
     SECTION("Multi-threaded stress test", "[basic]")
     {
+        constexpr long      num_operations = 1000000;
+
         SEFUtils::HeapWatcher::get_heap_watcher().start_watching();
 
         std::thread heap_loading_threads[5];
 
         for (int i = 0; i < 5; i++)
         {
-            heap_loading_threads[i] = std::thread(RandomHeapOperations);
+            heap_loading_threads[i] = std::thread(RandomHeapOperations, num_operations);
         }
 
         for (int i = 0; i < 5; i++)
@@ -192,5 +198,4 @@ TEST_CASE("Basic HeapWatrcher Tests", "[basic]")
 
         REQUIRE(leaks.open_allocations().size() == 0);
     }
-    */
 }

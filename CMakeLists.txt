@@ -44,5 +44,5 @@ set(CPACK_PROJECT_VERSION ${PROJECT_VERSION})
 include(CPack)
 
 add_subdirectory("src")
-add_subdirectory("unit tests")
+add_subdirectory("unit_tests")
 

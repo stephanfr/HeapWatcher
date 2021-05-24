@@ -45,9 +45,8 @@ void BuildBigMap()
     }
 }
 
-void RandomHeapOperations()
+void RandomHeapOperations( long num_operations )
 {
-    constexpr long NUM_OPERATIONS = 10000000;
     constexpr long INITIAL_DEQUEUE_SIZE = 10000;
     constexpr int MAX_ALLOCATION_SIZE = 1024;
     constexpr int MIN_ALLOCATION_SIZE = 2;
@@ -64,7 +63,7 @@ void RandomHeapOperations()
     long reallocs = 0;
     long frees = 0;
 
-    for (int i = 0; i < NUM_OPERATIONS; i++)
+    for (int i = 0; i < num_operations; i++)
     {
         switch (operation_dist(e1))
         {
