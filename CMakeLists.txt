@@ -1,6 +1,17 @@
 cmake_minimum_required(VERSION 3.14.0)
 project(HeapWatcher VERSION 0.1.0)
 
+# Determine if fmt is built as a subproject (using add_subdirectory)
+# or if it is the master project.
+if (NOT DEFINED HEAPWATCHER_IS_MASTER_PROJECT)
+  set(HEAPWATCHER_IS_MASTER_PROJECT OFF)
+  if (CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
+    set(HEAPWATCHER_IS_MASTER_PROJECT ON)
+    message(STATUS "CMake version: ${CMAKE_VERSION}")
+    message(STATUS "HeapWatcher is master project")
+  endif ()
+endif ()
+
 # specify the C++ standard
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
@@ -44,5 +55,8 @@ set(CPACK_PROJECT_VERSION ${PROJECT_VERSION})
 include(CPack)
 
 add_subdirectory("src")
-add_subdirectory("unit_tests")
+
+if( HEAPWATCHER_IS_MASTER_PROJECT )
+  add_subdirectory("unit_tests")
+endif()
 
