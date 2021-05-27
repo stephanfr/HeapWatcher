@@ -18,10 +18,10 @@ TEST_CASE("Basic HeapWatrcher Tests", "[basic]")
     {
         //  First, no leaks
 
-        SEFUtils::HeapWatcher::get_heap_watcher().start_watching();
+        SEFUtility::HeapWatcher::get_heap_watcher().start_watching();
 
         {
-            auto stats = SEFUtils::HeapWatcher::get_heap_watcher().high_level_stats();
+            auto stats = SEFUtility::HeapWatcher::get_heap_watcher().high_level_stats();
 
             REQUIRE(stats.number_of_mallocs() == 0);
             REQUIRE(stats.number_of_reallocs() == 0);
@@ -33,7 +33,7 @@ TEST_CASE("Basic HeapWatrcher Tests", "[basic]")
 
         NoLeaks();
 
-        auto leaks(SEFUtils::HeapWatcher::get_heap_watcher().stop_watching());
+        auto leaks(SEFUtility::HeapWatcher::get_heap_watcher().stop_watching());
 
         REQUIRE(leaks.open_allocations().size() == 0);
         REQUIRE(leaks.high_level_statistics().number_of_mallocs() == 1);
@@ -47,11 +47,11 @@ TEST_CASE("Basic HeapWatrcher Tests", "[basic]")
     {
         //  Now, one leak
 
-        SEFUtils::HeapWatcher::get_heap_watcher().start_watching();
+        SEFUtility::HeapWatcher::get_heap_watcher().start_watching();
 
         OneLeak();
 
-        auto leaks(SEFUtils::HeapWatcher::get_heap_watcher().stop_watching());
+        auto leaks(SEFUtility::HeapWatcher::get_heap_watcher().stop_watching());
 
         REQUIRE(leaks.open_allocations().size() == 1);
         REQUIRE_THAT(leaks.open_allocations()[0].stack_trace()[0].function(), Catch::Matchers::Equals("OneLeak()"));
@@ -67,11 +67,11 @@ TEST_CASE("Basic HeapWatrcher Tests", "[basic]")
     {
         //  Now, one leak from a nested function
 
-        SEFUtils::HeapWatcher::get_heap_watcher().start_watching();
+        SEFUtility::HeapWatcher::get_heap_watcher().start_watching();
 
         OneLeakNested();
 
-        auto leaks(SEFUtils::HeapWatcher::get_heap_watcher().stop_watching());
+        auto leaks(SEFUtility::HeapWatcher::get_heap_watcher().stop_watching());
 
         REQUIRE(leaks.open_allocations().size() == 1);
         REQUIRE_THAT(leaks.open_allocations()[0].stack_trace()[0].function(), Catch::Matchers::Equals("OneLeak()"));
@@ -89,11 +89,11 @@ TEST_CASE("Basic HeapWatrcher Tests", "[basic]")
     {
         //  Now, one leak that has been reallocated
 
-        SEFUtils::HeapWatcher::get_heap_watcher().start_watching();
+        SEFUtility::HeapWatcher::get_heap_watcher().start_watching();
 
         NoLeaksWithRealloc();
 
-        auto leaks(SEFUtils::HeapWatcher::get_heap_watcher().stop_watching());
+        auto leaks(SEFUtility::HeapWatcher::get_heap_watcher().stop_watching());
 
         REQUIRE(leaks.open_allocations().size() == 0);
 
@@ -108,11 +108,11 @@ TEST_CASE("Basic HeapWatrcher Tests", "[basic]")
     {
         //  Now, one leak that has been reallocated
 
-        SEFUtils::HeapWatcher::get_heap_watcher().start_watching();
+        SEFUtility::HeapWatcher::get_heap_watcher().start_watching();
 
         OneLeakWithRealloc();
 
-        auto leaks(SEFUtils::HeapWatcher::get_heap_watcher().stop_watching());
+        auto leaks(SEFUtility::HeapWatcher::get_heap_watcher().stop_watching());
 
         REQUIRE(leaks.open_allocations().size() == 1);
         REQUIRE_THAT(leaks.open_allocations()[0].stack_trace()[0].function(),
@@ -129,11 +129,11 @@ TEST_CASE("Basic HeapWatrcher Tests", "[basic]")
     {
         //  First, no leaks
 
-        SEFUtils::HeapWatcher::get_heap_watcher().start_watching();
+        SEFUtility::HeapWatcher::get_heap_watcher().start_watching();
 
         BuildBigMap();
 
-        auto leaks(SEFUtils::HeapWatcher::get_heap_watcher().stop_watching());
+        auto leaks(SEFUtility::HeapWatcher::get_heap_watcher().stop_watching());
 
         REQUIRE(leaks.open_allocations().size() == 0);
         REQUIRE(leaks.high_level_statistics().number_of_mallocs() == leaks.high_level_statistics().number_of_frees());
@@ -145,11 +145,11 @@ TEST_CASE("Basic HeapWatrcher Tests", "[basic]")
     {
         constexpr long      num_operations = 1000000;
 
-        SEFUtils::HeapWatcher::get_heap_watcher().start_watching();
+        SEFUtility::HeapWatcher::get_heap_watcher().start_watching();
 
         RandomHeapOperations(num_operations);
 
-        auto leaks(SEFUtils::HeapWatcher::get_heap_watcher().stop_watching());
+        auto leaks(SEFUtility::HeapWatcher::get_heap_watcher().stop_watching());
 
         REQUIRE(leaks.open_allocations().size() == 0);
     }
@@ -158,20 +158,20 @@ TEST_CASE("Basic HeapWatrcher Tests", "[basic]")
     {
         constexpr long      num_operations = 1000000;
 
-        SEFUtils::HeapWatcher::get_heap_watcher().start_watching();
+        SEFUtility::HeapWatcher::get_heap_watcher().start_watching();
 
         std::thread heap_loading_thread(RandomHeapOperations, num_operations);
 
         for (int i = 0; i < 5; i++)
         {
-            auto snapshot = SEFUtils::HeapWatcher::get_heap_watcher().snapshot();
+            auto snapshot = SEFUtility::HeapWatcher::get_heap_watcher().snapshot();
 
-            auto heap_stats = SEFUtils::HeapWatcher::get_heap_watcher().high_level_stats();
+            auto heap_stats = SEFUtility::HeapWatcher::get_heap_watcher().high_level_stats();
         }
 
         heap_loading_thread.join();
 
-        auto leaks(SEFUtils::HeapWatcher::get_heap_watcher().stop_watching());
+        auto leaks(SEFUtility::HeapWatcher::get_heap_watcher().stop_watching());
 
         REQUIRE(leaks.open_allocations().size() == 0);
     }
@@ -180,7 +180,7 @@ TEST_CASE("Basic HeapWatrcher Tests", "[basic]")
     {
         constexpr long      num_operations = 1000000;
 
-        SEFUtils::HeapWatcher::get_heap_watcher().start_watching();
+        SEFUtility::HeapWatcher::get_heap_watcher().start_watching();
 
         std::thread heap_loading_threads[5];
 
@@ -194,7 +194,7 @@ TEST_CASE("Basic HeapWatrcher Tests", "[basic]")
             heap_loading_threads[i].join();
         }
 
-        auto leaks(SEFUtils::HeapWatcher::get_heap_watcher().stop_watching());
+        auto leaks(SEFUtility::HeapWatcher::get_heap_watcher().stop_watching());
 
         REQUIRE(leaks.open_allocations().size() == 0);
     }

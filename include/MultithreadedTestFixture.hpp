@@ -10,7 +10,7 @@
 #include "HeapWatcher.hpp"
 
 
-namespace SEFUtils::HeapWatcher
+namespace SEFUtility::HeapWatcher
 {
     using namespace std::literals::chrono_literals;
 
@@ -26,10 +26,11 @@ namespace SEFUtils::HeapWatcher
 
         void add_workload(size_t num_workers, const std::function<void()>& workload_function, double random_start_in_seconds = 0)
         {
-            std::random_device rd;  //Will be used to obtain a seed for the random number engine
-            std::mt19937 gen(rd()); //Standard mersenne_twister_engine seeded with rd()
+            auto    pause_watching_thread_token( SEFUtility::HeapWatcher::get_heap_watcher().pause_watching_this_thread() );
+            
+            std::random_device rd;
+            std::mt19937 gen(rd());
             std::uniform_real_distribution<double> distrib(0, random_start_in_seconds);
-
 
             for (int i = 0; i < num_workers; i++)
             {
@@ -48,19 +49,15 @@ namespace SEFUtils::HeapWatcher
 
         void start_workload()
         {
-            SEFUtils::HeapWatcher::get_heap_watcher().start_watching();
-
             start_synchronizer_.set_value();
         }
 
-        HeapSnapshot wait_for_completion()
+        void wait_for_completion()
         {
             for ( auto& current_thread : test_threads_)
             {
                 current_thread.join();
             }
-
-            return SEFUtils::HeapWatcher::get_heap_watcher().stop_watching();
         }
 
        private:
@@ -82,4 +79,4 @@ namespace SEFUtils::HeapWatcher
             workload_function();
         }
     };
-}  // namespace SEFUtils::HeapWatcher
+}  // namespace SEFUtility::HeapWatcher

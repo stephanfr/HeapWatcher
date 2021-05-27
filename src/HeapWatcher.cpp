@@ -21,7 +21,7 @@ extern "C" void* __libc_malloc(size_t size);
 extern "C" void* __libc_realloc(void* address, size_t size);
 extern "C" void __libc_free(void* address);
 
-namespace SEFUtils::HeapWatcher
+namespace SEFUtility::HeapWatcher
 {
     using AllocationMap = std::map<void*, AllocationRecord>;
 
@@ -129,10 +129,10 @@ namespace SEFUtils::HeapWatcher
             {
                 PauseThreadWatchToken pause_watching_guard;
 
-                std::array<void*, SEFUtils::HeapWatcher::MAX_CALLSTACK_RETAINED + 2> stack_tail;
+                std::array<void*, SEFUtility::HeapWatcher::MAX_CALLSTACK_RETAINED + 2> stack_tail;
                 stack_tail.fill(nullptr);
 
-                backtrace(stack_tail.data(), SEFUtils::HeapWatcher::MAX_CALLSTACK_RETAINED + 2);
+                backtrace(stack_tail.data(), SEFUtility::HeapWatcher::MAX_CALLSTACK_RETAINED + 2);
 
                 worker_request_queue_.enqueue(WorkerRequest::malloc_request(size, address, stack_tail.data() + 2));
             }
@@ -187,7 +187,7 @@ namespace SEFUtils::HeapWatcher
         uint64_t bytes_allocated_{0};
         uint64_t bytes_freed_{0};
 
-        class PauseThreadWatchToken : public SEFUtils::HeapWatcher::PauseThreadWatchToken
+        class PauseThreadWatchToken : public SEFUtility::HeapWatcher::PauseThreadWatchToken
         {
            public:
             PauseThreadWatchToken() : saved_value_(watching_thread_) { watching_thread_ = false; }
@@ -330,17 +330,17 @@ namespace SEFUtils::HeapWatcher
         }
     }
 
-}  // namespace SEFUtils::HeapWatcher
+}  // namespace SEFUtility::HeapWatcher
 
 //
 //  Overrides of the C heap functions follow
 //
 
-void* malloc(size_t size) { return SEFUtils::HeapWatcher::heap_watcher_.instrumented_malloc(size); }
+void* malloc(size_t size) { return SEFUtility::HeapWatcher::heap_watcher_.instrumented_malloc(size); }
 
 void* realloc(void* address, size_t size)
 {
-    return SEFUtils::HeapWatcher::heap_watcher_.instrumented_realloc(address, size);
+    return SEFUtility::HeapWatcher::heap_watcher_.instrumented_realloc(address, size);
 }
 
-void free(void* address) { SEFUtils::HeapWatcher::heap_watcher_.instrumented_free(address); }
+void free(void* address) { SEFUtility::HeapWatcher::heap_watcher_.instrumented_free(address); }

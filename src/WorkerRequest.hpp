@@ -5,7 +5,7 @@
 
 #include "HeapWatcher.hpp"
 
-namespace SEFUtils::HeapWatcher
+namespace SEFUtility::HeapWatcher
 {
     uint64_t get_txn_id()
     {

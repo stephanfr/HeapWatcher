@@ -3,7 +3,7 @@
 #include <cxxabi.h>
 #include <execinfo.h>
 
-namespace SEFUtils::HeapWatcher
+namespace SEFUtility::HeapWatcher
 {
     const std::vector<ModuleFunctionOffset> AllocationRecord::stack_trace() const
     {

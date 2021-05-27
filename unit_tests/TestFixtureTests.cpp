@@ -12,21 +12,27 @@ TEST_CASE("Basic MultithreadedTestFixture Tests", "[basic]")
 {
     SECTION("One Workload, Few Threads, No Leaks", "[basic]")
     {
-        SEFUtils::HeapWatcher::MultithreadedTestFixture     test_fixture;
+        SEFUtility::HeapWatcher::MultithreadedTestFixture     test_fixture;
+
+        SEFUtility::HeapWatcher::get_heap_watcher().start_watching();
 
         test_fixture.add_workload( 5, &BuildBigMap, 1 );
 
         std::this_thread::sleep_for(1s);
 
         test_fixture.start_workload();
-        auto leaks = test_fixture.wait_for_completion();
+        test_fixture.wait_for_completion();
+
+        auto leaks = SEFUtility::HeapWatcher::get_heap_watcher().stop_watching();
 
         REQUIRE( leaks.open_allocations().size() == 0 );
     }
     
     SECTION("Two Workloads, Few Threads, one Leak", "[basic]")
     {
-        SEFUtils::HeapWatcher::MultithreadedTestFixture     test_fixture;
+        SEFUtility::HeapWatcher::MultithreadedTestFixture     test_fixture;
+
+        SEFUtility::HeapWatcher::get_heap_watcher().start_watching();
 
         test_fixture.add_workload( 5, &BuildBigMap );
         test_fixture.add_workload( 5, &OneLeak );
@@ -34,7 +40,9 @@ TEST_CASE("Basic MultithreadedTestFixture Tests", "[basic]")
         std::this_thread::sleep_for(1s);
 
         test_fixture.start_workload();
-        auto leaks = test_fixture.wait_for_completion();
+        test_fixture.wait_for_completion();
+
+        auto leaks = SEFUtility::HeapWatcher::get_heap_watcher().stop_watching();
 
         REQUIRE( leaks.open_allocations().size() == 5 );
     }
@@ -43,7 +51,9 @@ TEST_CASE("Basic MultithreadedTestFixture Tests", "[basic]")
     {
         constexpr long      num_operations = 2000000;
 
-        SEFUtils::HeapWatcher::MultithreadedTestFixture     test_fixture;
+        SEFUtility::HeapWatcher::MultithreadedTestFixture     test_fixture;
+
+        SEFUtility::HeapWatcher::get_heap_watcher().start_watching();
 
         test_fixture.add_workload( 20, std::bind( &RandomHeapOperations, num_operations ) );
         test_fixture.add_workload( 1, &OneLeak );
@@ -51,7 +61,9 @@ TEST_CASE("Basic MultithreadedTestFixture Tests", "[basic]")
         std::this_thread::sleep_for(1s);
 
         test_fixture.start_workload();
-        auto leaks = test_fixture.wait_for_completion();
+        test_fixture.wait_for_completion();
+
+        auto leaks = SEFUtility::HeapWatcher::get_heap_watcher().stop_watching();
 
         REQUIRE( leaks.open_allocations().size() == 1 );
     }

@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-namespace SEFUtils::HeapWatcher
+namespace SEFUtility::HeapWatcher
 {
     static constexpr int MAX_CALLSTACK_RETAINED = 4;
 
@@ -188,4 +188,4 @@ namespace SEFUtils::HeapWatcher
 
     HeapWatcher& get_heap_watcher();
 
-}  // namespace SEFUtils::HeapWatcher
+}  // namespace SEFUtility::HeapWatcher
