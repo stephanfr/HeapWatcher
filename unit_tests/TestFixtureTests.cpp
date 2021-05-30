@@ -12,11 +12,13 @@ TEST_CASE("Basic MultithreadedTestFixture Tests", "[basic]")
 {
     SECTION("One Workload, Few Threads, No Leaks", "[basic]")
     {
+        constexpr int   NUM_WORKERS = 5;
+
         SEFUtility::HeapWatcher::MultithreadedTestFixture     test_fixture;
 
         SEFUtility::HeapWatcher::get_heap_watcher().start_watching();
 
-        test_fixture.add_workload( 5, &BuildBigMap, 1 );
+        test_fixture.add_workload( NUM_WORKERS, &BuildBigMap, 1 );
 
         std::this_thread::sleep_for(1s);
 
@@ -25,17 +27,19 @@ TEST_CASE("Basic MultithreadedTestFixture Tests", "[basic]")
 
         auto leaks = SEFUtility::HeapWatcher::get_heap_watcher().stop_watching();
 
-        REQUIRE( leaks.open_allocations().size() == 0 );
+        REQUIRE( !leaks.has_leaks() );
     }
     
     SECTION("Two Workloads, Few Threads, one Leak", "[basic]")
     {
+        constexpr int   NUM_WORKERS = 5;
+
         SEFUtility::HeapWatcher::MultithreadedTestFixture     test_fixture;
 
         SEFUtility::HeapWatcher::get_heap_watcher().start_watching();
 
-        test_fixture.add_workload( 5, &BuildBigMap );
-        test_fixture.add_workload( 5, &OneLeak );
+        test_fixture.add_workload( NUM_WORKERS, &BuildBigMap );
+        test_fixture.add_workload( NUM_WORKERS, &OneLeak );
 
         std::this_thread::sleep_for(1s);
 
@@ -44,18 +48,19 @@ TEST_CASE("Basic MultithreadedTestFixture Tests", "[basic]")
 
         auto leaks = SEFUtility::HeapWatcher::get_heap_watcher().stop_watching();
 
-        REQUIRE( leaks.open_allocations().size() == 5 );
+        REQUIRE( leaks.open_allocations().size() == NUM_WORKERS );
     }
 
     SECTION("Torture Test, One Leak", "[basic]")
     {
-        constexpr long      num_operations = 2000000;
+        constexpr int64_t      num_operations = 2000000;
+        constexpr int       NUM_WORKERS = 20;
 
         SEFUtility::HeapWatcher::MultithreadedTestFixture     test_fixture;
 
         SEFUtility::HeapWatcher::get_heap_watcher().start_watching();
 
-        test_fixture.add_workload( 20, std::bind( &RandomHeapOperations, num_operations ) );
+        test_fixture.add_workload( NUM_WORKERS, std::bind( &RandomHeapOperations, num_operations ) );    //  NOLINT(modernize-avoid-bind)
         test_fixture.add_workload( 1, &OneLeak );
 
         std::this_thread::sleep_for(10s);

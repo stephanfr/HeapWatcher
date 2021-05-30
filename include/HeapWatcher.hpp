@@ -119,6 +119,9 @@ namespace SEFUtility::HeapWatcher
         HeapSnapshot& operator=(const HeapSnapshot&) = delete;
         HeapSnapshot& operator=(HeapSnapshot&&) = delete;
 
+        [[nodiscard]] bool  has_leaks() const { return !open_allocations_->empty(); }
+        [[nodiscard]] size_t numberof_leaks() const { return open_allocations_->size(); }
+
         [[nodiscard]] HighLevelStatistics high_level_statistics() const { return high_level_statistics_; }
 
         [[nodiscard]] const AllocationVector& open_allocations() const { return *open_allocations_; }

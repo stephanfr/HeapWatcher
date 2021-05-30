@@ -28,8 +28,11 @@ namespace SEFUtility::HeapWatcher
 
     class HeapWatcherImpl : public HeapWatcher
     {
+       private:
+        static constexpr size_t INITIAL_NUMBER_OF_BLOCKS = 32;
+
        public:
-        HeapWatcherImpl()
+        HeapWatcherImpl() : worker_request_queue_(INITIAL_NUMBER_OF_BLOCKS * LargeTraits::BLOCK_SIZE)
         {
             //  Get the stack tail once now - this will force loading glibc and
             //      prevent recursive calls to malloc later in the instrumented_malloc() method.
@@ -168,13 +171,20 @@ namespace SEFUtility::HeapWatcher
         }
 
        private:
+        struct LargeTraits : public moodycamel::ConcurrentQueueDefaultTraits
+        {
+            static const size_t BLOCK_SIZE = 128;
+            static const size_t INITIAL_IMPLICIT_PRODUCER_HASH_SIZE = 128;
+            static const size_t IMPLICIT_INITIAL_INDEX_SIZE = 128;
+        };
+
         std::atomic_bool watching_globally_{false};
 
         thread_local static bool watching_thread_;
 
         friend class PauseThreadWatchToken;
 
-        moodycamel::BlockingConcurrentQueue<WorkerRequest> worker_request_queue_;
+        moodycamel::BlockingConcurrentQueue<WorkerRequest, LargeTraits> worker_request_queue_;
 
         std::thread worker_thread_;
         std::atomic_bool worker_thread_running_{false};

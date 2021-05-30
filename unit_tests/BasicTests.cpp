@@ -38,7 +38,8 @@ TEST_CASE("Basic HeapWatrcher Tests", "[basic]")
 
         auto leaks(SEFUtility::HeapWatcher::get_heap_watcher().stop_watching());
 
-        REQUIRE(leaks.open_allocations().size() == 0);
+        REQUIRE(leaks.open_allocations().size() == 0);  //  NOLINT
+        REQUIRE(!leaks.has_leaks());
         REQUIRE(leaks.high_level_statistics().number_of_mallocs() == 1);
         REQUIRE(leaks.high_level_statistics().number_of_frees() == 1);
         REQUIRE(leaks.high_level_statistics().number_of_reallocs() == 0);
@@ -57,7 +58,11 @@ TEST_CASE("Basic HeapWatrcher Tests", "[basic]")
         auto leaks(SEFUtility::HeapWatcher::get_heap_watcher().stop_watching());
 
         REQUIRE(leaks.open_allocations().size() == 1);
+
+        //  The call stack for release builds is different from debug builds
+#ifndef NDEBUG
         REQUIRE_THAT(leaks.open_allocations()[0].stack_trace()[0].function(), Catch::Matchers::Equals("OneLeak()"));
+#endif
 
         REQUIRE(leaks.high_level_statistics().number_of_mallocs() == 1);
         REQUIRE(leaks.high_level_statistics().number_of_frees() == 0);
@@ -77,9 +82,13 @@ TEST_CASE("Basic HeapWatrcher Tests", "[basic]")
         auto leaks(SEFUtility::HeapWatcher::get_heap_watcher().stop_watching());
 
         REQUIRE(leaks.open_allocations().size() == 1);
+
+        //  The call stack for release builds is different from debug builds
+#ifndef NDEBUG
         REQUIRE_THAT(leaks.open_allocations()[0].stack_trace()[0].function(), Catch::Matchers::Equals("OneLeak()"));
         REQUIRE_THAT(leaks.open_allocations()[0].stack_trace()[1].function(),
                      Catch::Matchers::Equals("OneLeakNested()"));
+#endif
 
         REQUIRE(leaks.high_level_statistics().number_of_mallocs() == 1);
         REQUIRE(leaks.high_level_statistics().number_of_frees() == 0);
@@ -98,7 +107,7 @@ TEST_CASE("Basic HeapWatrcher Tests", "[basic]")
 
         auto leaks(SEFUtility::HeapWatcher::get_heap_watcher().stop_watching());
 
-        REQUIRE(leaks.open_allocations().size() == 0);
+        REQUIRE(!leaks.has_leaks());
 
         REQUIRE(leaks.high_level_statistics().number_of_mallocs() == 1);
         REQUIRE(leaks.high_level_statistics().number_of_frees() == 1);
@@ -118,8 +127,11 @@ TEST_CASE("Basic HeapWatrcher Tests", "[basic]")
         auto leaks(SEFUtility::HeapWatcher::get_heap_watcher().stop_watching());
 
         REQUIRE(leaks.open_allocations().size() == 1);
+        //  The call stack for release builds is different from debug builds
+#ifndef NDEBUG
         REQUIRE_THAT(leaks.open_allocations()[0].stack_trace()[0].function(),
                      Catch::Matchers::Equals("OneLeakWithRealloc()"));
+#endif
 
         REQUIRE(leaks.high_level_statistics().number_of_mallocs() == 1);
         REQUIRE(leaks.high_level_statistics().number_of_frees() == 0);
@@ -138,7 +150,7 @@ TEST_CASE("Basic HeapWatrcher Tests", "[basic]")
 
         auto leaks(SEFUtility::HeapWatcher::get_heap_watcher().stop_watching());
 
-        REQUIRE(leaks.open_allocations().size() == 0);
+        REQUIRE(!leaks.has_leaks());
         REQUIRE(leaks.high_level_statistics().number_of_mallocs() == leaks.high_level_statistics().number_of_frees());
         REQUIRE(leaks.high_level_statistics().number_of_reallocs() == 0);
         REQUIRE(leaks.high_level_statistics().bytes_freed() == leaks.high_level_statistics().bytes_allocated());
@@ -146,7 +158,7 @@ TEST_CASE("Basic HeapWatrcher Tests", "[basic]")
 
     SECTION("Many Random Heap Operations No Leaks", "[basic]")
     {
-        constexpr long      num_operations = 1000000;
+        constexpr int64_t num_operations = 1000000;
 
         SEFUtility::HeapWatcher::get_heap_watcher().start_watching();
 
@@ -154,69 +166,71 @@ TEST_CASE("Basic HeapWatrcher Tests", "[basic]")
 
         auto leaks(SEFUtility::HeapWatcher::get_heap_watcher().stop_watching());
 
-        REQUIRE(leaks.open_allocations().size() == 0);
+        REQUIRE(!leaks.has_leaks());
     }
 
     SECTION("Insure getting snapshot does not leak", "[basic]")
     {
-        constexpr long      num_operations = 1000000;
+        constexpr int64_t num_operations = 1000000;
+        constexpr int NUM_THREADS = 5;
 
         SEFUtility::HeapWatcher::get_heap_watcher().start_watching();
 
         std::thread heap_loading_thread(RandomHeapOperations, num_operations);
 
-        for (int i = 0; i < 5; i++)
+        for (int i = 0; i < NUM_THREADS; i++)
         {
             auto snapshot = SEFUtility::HeapWatcher::get_heap_watcher().snapshot();
 
-            auto heap_stats = SEFUtility::HeapWatcher::get_heap_watcher().high_level_stats();
+            auto heap_stats = SEFUtility::HeapWatcher::get_heap_watcher().high_level_stats();  //  NOLINT
         }
 
         heap_loading_thread.join();
 
         auto leaks(SEFUtility::HeapWatcher::get_heap_watcher().stop_watching());
 
-        REQUIRE(leaks.open_allocations().size() == 0);
+        REQUIRE(!leaks.has_leaks());
     }
 
     SECTION("Multi-threaded stress test", "[basic]")
     {
-        constexpr long      num_operations = 1000000;
+        constexpr int64_t NUM_OPERATIONS = 1000000;
+        constexpr int NUM_THREADS = 5;
 
         SEFUtility::HeapWatcher::get_heap_watcher().start_watching();
 
-        std::thread heap_loading_threads[5];
+        std::array<std::thread, NUM_THREADS> heap_loading_threads;
 
-        for (int i = 0; i < 5; i++)
+        for (int i = 0; i < NUM_THREADS; i++)
         {
-            heap_loading_threads[i] = std::thread(RandomHeapOperations, num_operations);
+            heap_loading_threads.at(i) = std::thread(RandomHeapOperations, NUM_OPERATIONS);
         }
 
-        for (int i = 0; i < 5; i++)
+        for (int i = 0; i < NUM_THREADS; i++)
         {
-            heap_loading_threads[i].join();
+            heap_loading_threads.at(i).join();
         }
 
         auto leaks(SEFUtility::HeapWatcher::get_heap_watcher().stop_watching());
 
-        REQUIRE(leaks.open_allocations().size() == 0);
+        REQUIRE(!leaks.has_leaks());
     }
-    
+
     SECTION("Multi-threaded out of order free/malloc message test", "[basic]")
     {
-        constexpr long      num_operations = 2000;
+        constexpr int64_t NUM_OPERATIONS = 2000;
 
         SEFUtility::HeapWatcher::get_heap_watcher().start_watching();
 
-        for (int i = 0; i < num_operations; i++)
+        for (int i = 0; i < NUM_OPERATIONS; i++)
         {
-            std::thread     race_thread( MallocFreeRace );
+            std::thread race_thread(MallocFreeRace);
 
             race_thread.join();
         }
 
         auto leaks(SEFUtility::HeapWatcher::get_heap_watcher().stop_watching());
 
-        REQUIRE(leaks.open_allocations().size() == 0);
+        REQUIRE(!leaks.has_leaks());
     }
 }
