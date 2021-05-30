@@ -58,7 +58,7 @@ TEST_CASE("Basic MultithreadedTestFixture Tests", "[basic]")
         test_fixture.add_workload( 20, std::bind( &RandomHeapOperations, num_operations ) );
         test_fixture.add_workload( 1, &OneLeak );
 
-        std::this_thread::sleep_for(1s);
+        std::this_thread::sleep_for(10s);
 
         test_fixture.start_workload();
         test_fixture.wait_for_completion();

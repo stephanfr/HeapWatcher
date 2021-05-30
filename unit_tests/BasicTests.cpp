@@ -1,9 +1,12 @@
 #include <catch2/catch_all.hpp>
+#include <future>
 #include <iostream>
 #include <thread>
 
 #include "HeapWatcher.hpp"
 #include "TestWorkloads.hpp"
+
+using namespace std::literals::chrono_literals;
 
 //  The pragma below is to disable to false errors flagged by intellisense for
 //  Catch2 REQUIRE macros.
@@ -192,6 +195,24 @@ TEST_CASE("Basic HeapWatrcher Tests", "[basic]")
         for (int i = 0; i < 5; i++)
         {
             heap_loading_threads[i].join();
+        }
+
+        auto leaks(SEFUtility::HeapWatcher::get_heap_watcher().stop_watching());
+
+        REQUIRE(leaks.open_allocations().size() == 0);
+    }
+    
+    SECTION("Multi-threaded out of order free/malloc message test", "[basic]")
+    {
+        constexpr long      num_operations = 2000;
+
+        SEFUtility::HeapWatcher::get_heap_watcher().start_watching();
+
+        for (int i = 0; i < num_operations; i++)
+        {
+            std::thread     race_thread( MallocFreeRace );
+
+            race_thread.join();
         }
 
         auto leaks(SEFUtility::HeapWatcher::get_heap_watcher().stop_watching());

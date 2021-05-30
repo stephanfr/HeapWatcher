@@ -11,6 +11,7 @@
 #include <list>
 #include <map>
 #include <memory>
+#include <unordered_set>
 
 #include "WorkerRequest.hpp"
 #include "blockingconcurrentqueue.h"
@@ -179,6 +180,7 @@ namespace SEFUtility::HeapWatcher
         std::atomic_bool worker_thread_running_{false};
 
         std::map<void*, AllocationRecord> allocations_;
+        std::unordered_set<void*> frees_without_mallocs_;
 
         uint64_t number_of_mallocs_{0};
         uint64_t number_of_reallocs_{0};
@@ -278,13 +280,17 @@ namespace SEFUtility::HeapWatcher
 
                     case WorkerOperation::FREE_REQUEST:
                     {
-                        number_of_frees_++;
                         auto iterator = allocations_.find(requests[i].block_to_free());
 
                         if (iterator != allocations_.end())
                         {
+                            number_of_frees_++;
                             bytes_freed_ += iterator->second.size();
                             allocations_.erase(iterator);
+                        }
+                        else
+                        {
+                            frees_without_mallocs_.emplace(requests[i].block_to_free());
                         }
                     }
                     break;
@@ -298,12 +304,31 @@ namespace SEFUtility::HeapWatcher
                         bytes_freed_ = 0;
 
                         allocations_.clear();
+                        frees_without_mallocs_.clear();
+
                         requests[i].clear_allocations_promise().set_value();
                     }
                     break;
 
                     case WorkerOperation::GET_ALLOCATION_SNAPSHOT:
                     {
+                        //  First, check for any mallocs that may have been caught in
+                        //      race conditions with their frees.  This can sometimes happen
+                        //      with copies of stack elements which allocate heap space internally,
+                        //      like std::string.
+
+                        for (auto current_free : frees_without_mallocs_)
+                        {
+                            auto iterator = allocations_.find(current_free);
+
+                            if (iterator != allocations_.end())
+                            {
+                                number_of_frees_++;
+                                bytes_freed_ += iterator->second.size();
+                                allocations_.erase(iterator);
+                            }
+                        }
+
                         std::unique_ptr<AllocationVector> snapshot(new AllocationVector());
 
                         snapshot->reserve(allocations_.size());
