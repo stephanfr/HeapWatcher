@@ -117,7 +117,7 @@ namespace SEFUtility::HeapWatcher
         ~HeapSnapshot() = default;
 
         HeapSnapshot& operator=(const HeapSnapshot&) = delete;
-        HeapSnapshot& operator=(HeapSnapshot&&) = delete;
+        HeapSnapshot& operator=(HeapSnapshot&& snapshot_to_move) = delete;
 
         [[nodiscard]] bool  has_leaks() const { return !open_allocations_->empty(); }
         [[nodiscard]] size_t numberof_leaks() const { return open_allocations_->size(); }
@@ -181,7 +181,7 @@ namespace SEFUtility::HeapWatcher
     {
        public:
         virtual void start_watching() = 0;
-        virtual const HeapSnapshot stop_watching() = 0;
+        virtual HeapSnapshot stop_watching() = 0;
 
         [[nodiscard]] virtual PauseThreadWatchGuard pause_watching_this_thread() = 0;
 

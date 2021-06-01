@@ -78,7 +78,7 @@ namespace SEFUtility::HeapWatcher
             watching_globally_ = true;
         }
 
-        const HeapSnapshot stop_watching() final
+        HeapSnapshot stop_watching() final
         {
             watching_globally_ = false;
 
