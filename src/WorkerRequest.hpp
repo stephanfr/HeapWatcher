@@ -48,10 +48,7 @@ namespace SEFUtility::HeapWatcher
     {
        public:
         WorkerRequest() : operation_(WorkerOperation::UNINITIALIZED)
-        {
-            static_assert(sizeof(WorkerRequest) <= 64,
-                          "WorkerRequest Record should be 64 bytes or less to fit in one cache row.");
-        }
+        {}
 
         WorkerRequest(const WorkerRequest& request) : operation_(request.operation_)
         {

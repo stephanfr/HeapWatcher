@@ -11,6 +11,8 @@ using namespace std::literals::chrono_literals;
 #pragma GCC push_options
 #pragma GCC optimize("O0")
 
+
+
 void NoLeaks()
 {
     int* new_int = static_cast<int*>(malloc(sizeof(int)));          //  NOLINT(cppcoreguidelines-no-malloc,cppcoreguidelines-owning-memory,hicpp-no-malloc)
@@ -21,6 +23,8 @@ void NoLeaks()
 void OneLeak() { int* new_int = static_cast<int*>(malloc(sizeof(int))); }   //  NOLINT
 
 void OneLeakNested() { OneLeak(); }
+
+void OneCallocLeak() { long* new_int = static_cast<long*>(calloc(sizeof(long), NUMBER_OF_LONGS_IN_ONE_CALLOC_LEAK)); }   //  NOLINT
 
 void NoLeaksWithRealloc()
 {

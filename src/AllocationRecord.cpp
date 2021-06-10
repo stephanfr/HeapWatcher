@@ -85,6 +85,7 @@ namespace SEFUtility::HeapWatcher
         //  Return the line
 
         return ModuleFunctionOffset(
+            std::move(mangled_line.substr(mangled_line.find('[') + 1, mangled_line.find(']') - mangled_line.find('[') - 1)),
             std::move(mangled_line.substr(0, mangled_line.find('('))), std::move(unmangled_name),
             std::move(mangled_line.substr(mangled_line.find('+'), mangled_line.find(')') - mangled_line.find('+'))));
     }
