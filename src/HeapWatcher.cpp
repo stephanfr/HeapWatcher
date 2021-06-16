@@ -13,6 +13,7 @@
 #include <memory>
 #include <unordered_set>
 
+#include "BacktraceDemangler.hpp"
 #include "WorkerRequest.hpp"
 #include "blockingconcurrentqueue.h"
 
@@ -41,6 +42,23 @@ namespace SEFUtility::HeapWatcher
     typedef void* (*CallocFunctionPointer)(size_t, size_t);
     typedef void* (*ReallocFunctionPointer)(void*, size_t);
     typedef void (*FreeFunctionPointer)(void*);
+
+    std::ostream& operator<<(std::ostream& os, const ModuleFunctionOffset& record)
+    {
+        os << record.address_ << "    " << record.module_ << "    " << record.function_ << "    " << record.offset_;
+
+        return os;
+    }
+
+    std::ostream& operator<<(std::ostream& os, const std::vector<ModuleFunctionOffset>& records)
+    {
+        for (auto record : records)
+        {
+            os << record << std::endl;
+        }
+
+        return os;
+    }
 
     class HeapWatcherImpl : public HeapWatcher
     {
@@ -72,7 +90,9 @@ namespace SEFUtility::HeapWatcher
             //  Next, pthreads intentionally leak so we want to create one now and capture the address
             //      of the function that leaks.
 
-            capture_known_leak([]() {
+            std::list<std::string> leaking_symbol{"_dl_allocate_tls"};
+
+            capture_known_leak(leaking_symbol, []() {
                 std::thread leaky_thread([]() { std::this_thread::sleep_for(1ms); });
 
                 leaky_thread.join();
@@ -92,10 +112,15 @@ namespace SEFUtility::HeapWatcher
             return std::find(known_leaks_.begin(), known_leaks_.end(), function_address) != known_leaks_.end();
         }
 
-        uint64_t capture_known_leak(std::function<void()> function_which_leaks);
+        uint64_t capture_known_leak(std::list<std::string>& leaking_symbols,
+                                    std::function<void()> function_which_leaks);
+
+        const KnownLeaks known_leaks() const { return KnownLeaks(known_leaks_); }
 
         void start_watching() final
         {
+            std::lock_guard<std::mutex> guard(command_mutex_);
+
             if (watching_globally_)
             {
                 return;
@@ -118,6 +143,8 @@ namespace SEFUtility::HeapWatcher
 
         HeapSnapshot stop_watching() final
         {
+            std::lock_guard<std::mutex> guard(command_mutex_);
+
             remove_instrumentation();
 
             std::promise<HeapSnapshot> snapshot_promise;
@@ -265,14 +292,12 @@ namespace SEFUtility::HeapWatcher
             {
                 PauseThreadWatchToken pause_watching_guard;
 
-                std::cout << "single thread malloc: " << address << std::endl;
-
                 std::array<void*, MAX_CALLSTACK_RETAINED + MALLOC_DEPTH_IN_CALL_STACK> stack_tail;
                 stack_tail.fill(nullptr);
 
                 backtrace(stack_tail.data(), MAX_CALLSTACK_RETAINED + MALLOC_DEPTH_IN_CALL_STACK);
 
-                allocations_.emplace(std::make_pair(
+                single_threaded_allocations_.emplace(std::make_pair(
                     address,
                     AllocationRecord(size, address, get_txn_id(), &stack_tail.data()[MALLOC_DEPTH_IN_CALL_STACK])));
             }
@@ -290,14 +315,12 @@ namespace SEFUtility::HeapWatcher
             {
                 PauseThreadWatchToken pause_watching_guard;
 
-                std::cout << "single thread calloc: " << address << std::endl;
-
                 std::array<void*, MAX_CALLSTACK_RETAINED + CALLOC_DEPTH_IN_CALL_STACK> stack_tail;
                 stack_tail.fill(nullptr);
 
                 backtrace(stack_tail.data(), MAX_CALLSTACK_RETAINED + CALLOC_DEPTH_IN_CALL_STACK);
 
-                allocations_.emplace(std::make_pair(
+                single_threaded_allocations_.emplace(std::make_pair(
                     address,
                     AllocationRecord(size, address, get_txn_id(), &stack_tail.data()[CALLOC_DEPTH_IN_CALL_STACK])));
             }
@@ -318,9 +341,9 @@ namespace SEFUtility::HeapWatcher
                 if (auto prior_allocation_itr = allocations_.find(original_address);
                     prior_allocation_itr != allocations_.end())
                 {
-                    allocations_.erase(original_address);
+                    single_threaded_allocations_.erase(original_address);
 
-                    allocations_.emplace(
+                    single_threaded_allocations_.emplace(
                         std::make_pair(new_address, AllocationRecord(new_size, new_address, get_txn_id(),
                                                                      prior_allocation_itr->second.raw_stack_trace())));
                 }
@@ -337,9 +360,7 @@ namespace SEFUtility::HeapWatcher
             {
                 PauseThreadWatchToken pause_watching_guard;
 
-                std::cout << "single thread free: " << address << std::endl;
-
-                allocations_.erase(address);
+                single_threaded_allocations_.erase(address);
             }
         }
 
@@ -359,7 +380,7 @@ namespace SEFUtility::HeapWatcher
 
         thread_local static bool watching_thread_;
 
-        std::mutex capture_known_leak_mutex_;
+        std::mutex command_mutex_;
         std::thread::id watched_single_thread_id_;
 
         friend class PauseThreadWatchToken;
@@ -368,6 +389,8 @@ namespace SEFUtility::HeapWatcher
 
         std::thread worker_thread_;
         std::atomic_bool worker_thread_running_{false};
+
+        std::map<const void*, AllocationRecord> single_threaded_allocations_;
 
         std::map<const void*, AllocationRecord> allocations_;
         std::unordered_set<void*> frees_without_mallocs_;
@@ -453,9 +476,25 @@ namespace SEFUtility::HeapWatcher
     //  HeapWatcherImpl implementation
     //
 
-    uint64_t HeapWatcherImpl::capture_known_leak(std::function<void()> function_which_leaks)
+    uint64_t HeapWatcherImpl::capture_known_leak(std::list<std::string>& leaking_symbols,
+                                                 std::function<void()> function_which_leaks)
     {
-        std::lock_guard<std::mutex> guard(capture_known_leak_mutex_);
+        //  Make sure this is the only thing the HeapWatcher is doing and that we are not already
+        //      watching globally.
+
+        std::lock_guard<std::mutex> guard(command_mutex_);
+
+        if (watching_globally_)
+        {
+            return -1;
+        }
+
+        //  Clear the record of allocations, then launch a separate thread within which we
+        //      set the thread id and then swap in the single thread instrumented functions
+        //      and then run the leaking code.  After the leaking code finishes, we yank out
+        //      the instrumented functions.
+
+        single_threaded_allocations_.clear();
 
         auto leaking_thread = std::async(std::launch::async, [this, function_which_leaks]() {
             watched_single_thread_id_ = std::this_thread::get_id();
@@ -471,17 +510,43 @@ namespace SEFUtility::HeapWatcher
 
         leaking_thread.wait();
 
-        std::this_thread::sleep_for(1s);
+        //  Get the symbols for the leak(s) so that we can filter on specific function names
 
-        for (auto leak : allocations_)
+        std::vector<const void*> leaks_found;
+
+        leaks_found.reserve(single_threaded_allocations_.size());
+
+        for (auto leak : single_threaded_allocations_)
+        {
+            leaks_found.emplace_back(leak.second.raw_stack_trace()[0]);
+        }
+
+        auto leaking_symbols_found = symbols_for_addresses(leaks_found);
+
+        //  Finally, pass through the leaks and we will only keep those that match names
+        //      passed into the function.
+
+        int i = 0;
+        int number_of_leaks_found = 0;
+        for (auto leak : single_threaded_allocations_)
         {
             if (!is_known_leak(leak.second.raw_stack_trace()[0]))
             {
-                known_leaks_.emplace_back(leak.second.raw_stack_trace()[0]);
+                if (std::find(leaking_symbols.begin(), leaking_symbols.end(), leaking_symbols_found[i].function()) !=
+                    leaking_symbols.end())
+                {
+                    known_leaks_.emplace_back(leak.second.raw_stack_trace()[0]);
+                    number_of_leaks_found++;
+                }
             }
+            i++;
         }
 
-        return allocations_.size();
+        //  Clear the single threaded leak collection and return the number of leaks we found and filtered.
+
+        single_threaded_allocations_.clear();
+
+        return number_of_leaks_found;
     }
 
     void HeapWatcherImpl::worker_main()
@@ -522,9 +587,9 @@ namespace SEFUtility::HeapWatcher
                             bytes_allocated_ -= record->second.size();
                             bytes_allocated_ += requests[i].realloc_record().new_size_;
 
-                            AllocationRecord revised_record(
-                                requests[i].realloc_record().new_size_, requests[i].realloc_record().new_address_,
-                                record->second.txn_id(), record->second.raw_stack_trace().data());
+                            AllocationRecord revised_record(requests[i].realloc_record().new_size_,
+                                                            requests[i].realloc_record().new_address_,
+                                                            record->second.txn_id(), record->second.raw_stack_trace());
 
                             allocations_.erase(record);
 
@@ -534,7 +599,7 @@ namespace SEFUtility::HeapWatcher
                         {
                             AllocationRecord allocation_record(
                                 requests[i].realloc_record().new_size_, requests[i].realloc_record().new_address_,
-                                record->second.txn_id(), record->second.raw_stack_trace().data());
+                                record->second.txn_id(), record->second.raw_stack_trace());
 
                             allocations_.emplace(requests[i].realloc_record().new_address_, allocation_record);
                         }

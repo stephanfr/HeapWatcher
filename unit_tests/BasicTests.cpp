@@ -17,8 +17,18 @@ extern "C" void* _dl_allocate_tls(void*);
 #pragma diag_suppress 2486
 #endif
 
-TEST_CASE("Basic HeapWatrcher Tests", "[basic]")
+TEST_CASE("Basic HeapWatcher Tests", "[basic]")
 {
+    SECTION("Two Known Leaks", "[basic]")
+    {
+        //  Initially we should have only a single know leak that is populated by the
+        //      constructor.  This is a purposeful leak of pthread thread local storage.
+
+        REQUIRE(SEFUtility::HeapWatcher::get_heap_watcher().known_leaks().addresses().size() == 1);
+        REQUIRE_THAT(SEFUtility::HeapWatcher::get_heap_watcher().known_leaks().symbols()[0].function(),
+                     Catch::Matchers::Equals("_dl_allocate_tls"));
+    }
+
     SECTION("No Leaks", "[basic]")
     {
         //  First, no leaks
@@ -83,11 +93,11 @@ TEST_CASE("Basic HeapWatrcher Tests", "[basic]")
         REQUIRE(leaks.open_allocations().size() == 1);
 
         int i = 0;
-        for( auto leak : leaks.open_allocations()[0].stack_trace() )
+        for (auto leak : leaks.open_allocations()[0].stack_trace())
         {
-            char    buffer[32];
-            std::sprintf(buffer,"%p", leaks.open_allocations()[0].raw_stack_trace()[i++] );
-            REQUIRE_THAT( buffer, Catch::Matchers::Equals( leak.address() ));
+            char buffer[32];
+            std::sprintf(buffer, "%p", leaks.open_allocations()[0].raw_stack_trace()[i++]);
+            REQUIRE_THAT(buffer, Catch::Matchers::Equals(leak.address()));
         }
 
         REQUIRE_THAT(leaks.open_allocations()[0].stack_trace()[0].function(), Catch::Matchers::Equals("OneLeak()"));
@@ -102,7 +112,7 @@ TEST_CASE("Basic HeapWatrcher Tests", "[basic]")
     }
 
     SECTION("One Calloc Leak", "[basic]")
-    {    
+    {
         //  Now, one leak
 
         SEFUtility::HeapWatcher::get_heap_watcher().start_watching();
@@ -162,6 +172,29 @@ TEST_CASE("Basic HeapWatrcher Tests", "[basic]")
         REQUIRE(leaks.high_level_statistics().number_of_reallocs() == 1);
         REQUIRE(leaks.high_level_statistics().bytes_allocated() == sizeof(int) * 2);
         REQUIRE(leaks.high_level_statistics().bytes_freed() == 0);
+    }
+
+    SECTION("Known Leak", "[basic]")
+    {
+        std::list<std::string> leaking_symbol({"KnownLeak()"});
+
+        REQUIRE( SEFUtility::HeapWatcher::get_heap_watcher().capture_known_leak(leaking_symbol, []() { KnownLeak(); }) == 1 );
+
+        REQUIRE(SEFUtility::HeapWatcher::get_heap_watcher().known_leaks().addresses().size() == 2);
+        REQUIRE_THAT(SEFUtility::HeapWatcher::get_heap_watcher().known_leaks().symbols()[0].function(),
+                     Catch::Matchers::Equals("_dl_allocate_tls"));
+        REQUIRE_THAT(SEFUtility::HeapWatcher::get_heap_watcher().known_leaks().symbols()[1].function(),
+                     Catch::Matchers::Equals("KnownLeak()"));
+
+        SEFUtility::HeapWatcher::get_heap_watcher().start_watching();
+
+        OneLeakNested();
+        KnownLeak();
+        OneLeak();
+
+        auto leaks(SEFUtility::HeapWatcher::get_heap_watcher().stop_watching());
+
+        REQUIRE(leaks.open_allocations().size() == 2);
     }
 
     SECTION("Many Allocations No Leaks", "[basic]")

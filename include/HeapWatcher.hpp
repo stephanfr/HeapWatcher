@@ -1,6 +1,8 @@
 #pragma once
 
 #include <cstring>
+#include <functional>
+#include <iostream>
 #include <list>
 #include <memory>
 #include <string>
@@ -8,11 +10,11 @@
 
 namespace SEFUtility::HeapWatcher
 {
-    #ifdef MAX_CALLSTACK_DEPTH_RETAINED
+#ifdef MAX_CALLSTACK_DEPTH_RETAINED
     static constexpr int MAX_CALLSTACK_RETAINED = MAX_CALLSTACK_DEPTH_RETAINED;
-    #else
+#else
     static constexpr int MAX_CALLSTACK_RETAINED = 4;
-    #endif
+#endif
 
     class HighLevelStatistics
     {
@@ -35,8 +37,8 @@ namespace SEFUtility::HeapWatcher
         [[nodiscard]] uint64_t bytes_freed() const { return bytes_freed_; }
 
        private:
-        HighLevelStatistics(uint64_t number_of_mallocs, uint64_t number_of_reallocs, uint64_t number_of_frees, uint64_t number_of_known_leaks,
-                            uint64_t bytes_allocated, uint64_t bytes_freed)
+        HighLevelStatistics(uint64_t number_of_mallocs, uint64_t number_of_reallocs, uint64_t number_of_frees,
+                            uint64_t number_of_known_leaks, uint64_t bytes_allocated, uint64_t bytes_freed)
             : number_of_mallocs_(number_of_mallocs),
               number_of_reallocs_(number_of_reallocs),
               number_of_frees_(number_of_frees),
@@ -62,7 +64,10 @@ namespace SEFUtility::HeapWatcher
     {
        public:
         ModuleFunctionOffset(std::string address, std::string module, std::string function, std::string offset)
-            : address_(std::move(address)), module_(std::move(module)), function_(std::move(function)), offset_(std::move(offset))
+            : address_(std::move(address)),
+              module_(std::move(module)),
+              function_(std::move(function)),
+              offset_(std::move(offset))
         {
         }
 
@@ -76,7 +81,11 @@ namespace SEFUtility::HeapWatcher
         const std::string module_;
         const std::string function_;
         const std::string offset_;
+
+        friend std::ostream& operator<<( std::ostream& os, const ModuleFunctionOffset& record);
     };
+
+    std::ostream& operator<<( std::ostream& os, const std::vector<ModuleFunctionOffset>& records);
 
     class AllocationRecord
     {
@@ -86,7 +95,7 @@ namespace SEFUtility::HeapWatcher
         [[nodiscard]] size_t size() const { return size_; }
         [[nodiscard]] const void* address() const { return address_; }
         [[nodiscard]] uint64_t txn_id() const { return txn_id_; }
-        [[nodiscard]] const std::array<void*, MAX_CALLSTACK_RETAINED>& raw_stack_trace() const { return stack_tail_; }
+        [[nodiscard]] const std::array<const void*, MAX_CALLSTACK_RETAINED>& raw_stack_trace() const { return stack_tail_; }
 
         [[nodiscard]] const std::vector<ModuleFunctionOffset> stack_trace() const;
 
@@ -94,18 +103,22 @@ namespace SEFUtility::HeapWatcher
         const size_t size_;
         const void* address_;
         const uint64_t txn_id_;
-        const std::array<void*, MAX_CALLSTACK_RETAINED> stack_tail_;
+        const std::array<const void*, MAX_CALLSTACK_RETAINED> stack_tail_;
 
         //  NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init, hicpp-member-init)
-        AllocationRecord(size_t size, void* address, uint32_t txn_id, std::array<void*, MAX_CALLSTACK_RETAINED> stack_tail)
-            : size_(size), address_(address), txn_id_(txn_id), stack_tail_( stack_tail )
-        {}
+        AllocationRecord(size_t size, void* address, uint32_t txn_id,
+                         std::array<const void*, MAX_CALLSTACK_RETAINED> stack_tail)
+            : size_(size), address_(address), txn_id_(txn_id), stack_tail_(stack_tail)
+        {
+        }
 
         AllocationRecord(size_t size, void* address, uint32_t txn_id, void* const* stack_tail)
-            : size_(size), address_(address), txn_id_(txn_id), stack_tail_( *(reinterpret_cast<const std::array<void*, MAX_CALLSTACK_RETAINED>*>(stack_tail) ))
-        {}
-
-        ModuleFunctionOffset decode_mangled_line(const char* backtrace_line) const;
+            : size_(size),
+              address_(address),
+              txn_id_(txn_id),
+              stack_tail_(*(reinterpret_cast<const std::array<const void*, MAX_CALLSTACK_RETAINED>*>(stack_tail)))
+        {
+        }
 
         friend class HeapWatcherImpl;
         friend class WorkerRequest;
@@ -130,7 +143,7 @@ namespace SEFUtility::HeapWatcher
         HeapSnapshot& operator=(const HeapSnapshot&) = delete;
         HeapSnapshot& operator=(HeapSnapshot&& snapshot_to_move) = delete;
 
-        [[nodiscard]] bool  has_leaks() const { return !open_allocations_->empty(); }
+        [[nodiscard]] bool has_leaks() const { return !open_allocations_->empty(); }
         [[nodiscard]] size_t numberof_leaks() const { return open_allocations_->size(); }
 
         [[nodiscard]] const HighLevelStatistics& high_level_statistics() const { return high_level_statistics_; }
@@ -138,17 +151,36 @@ namespace SEFUtility::HeapWatcher
         [[nodiscard]] const AllocationVector& open_allocations() const { return *open_allocations_; }
 
        private:
-        HeapSnapshot(uint64_t number_of_mallocs, uint64_t number_of_reallocs, uint64_t number_of_frees, uint64_t number_of_known_leaks,
-                     uint64_t bytes_allocated, uint64_t bytes_freed,
+        HeapSnapshot(uint64_t number_of_mallocs, uint64_t number_of_reallocs, uint64_t number_of_frees,
+                     uint64_t number_of_known_leaks, uint64_t bytes_allocated, uint64_t bytes_freed,
                      std::unique_ptr<AllocationVector>& open_allocations)  // NOLINT(google-runtime-references)
-            : high_level_statistics_(number_of_mallocs, number_of_reallocs, number_of_frees, number_of_known_leaks, bytes_allocated,
-                                     bytes_freed),
+            : high_level_statistics_(number_of_mallocs, number_of_reallocs, number_of_frees, number_of_known_leaks,
+                                     bytes_allocated, bytes_freed),
               open_allocations_(open_allocations.release())
         {
         }
 
         const HighLevelStatistics high_level_statistics_;
         std::unique_ptr<const AllocationVector> open_allocations_;
+
+        friend class HeapWatcherImpl;
+    };
+
+    class KnownLeaks
+    {
+       public:
+        KnownLeaks(const KnownLeaks& known_leaks) : known_leaks_(known_leaks.known_leaks_) {}
+
+        KnownLeaks(KnownLeaks&& known_leaks) : known_leaks_(std::move(known_leaks.known_leaks_)) {}
+
+        [[nodiscard]] const std::vector<const void*>& addresses() const { return known_leaks_; }
+
+        [[nodiscard]] const std::vector<ModuleFunctionOffset> symbols() const;
+
+       private:
+        KnownLeaks(const std::vector<const void*>& known_leaks) : known_leaks_(known_leaks) {}
+
+        const std::vector<const void*> known_leaks_;
 
         friend class HeapWatcherImpl;
     };
@@ -176,7 +208,8 @@ namespace SEFUtility::HeapWatcher
         explicit PauseThreadWatchGuard(std::unique_ptr<PauseThreadWatchToken> token) : token_(token.release()) {}
 
         PauseThreadWatchGuard(PauseThreadWatchGuard&& guard_to_move) noexcept : token_(guard_to_move.token_.release())
-        {}
+        {
+        }
 
         ~PauseThreadWatchGuard() = default;
 
@@ -192,6 +225,9 @@ namespace SEFUtility::HeapWatcher
        public:
         virtual void start_watching() = 0;
         virtual HeapSnapshot stop_watching() = 0;
+
+        virtual uint64_t capture_known_leak(std::list<std::string>& leaking_symbols, std::function<void()> function_which_leaks) = 0;
+        [[nodiscard]] virtual const KnownLeaks known_leaks() const = 0;
 
         [[nodiscard]] virtual PauseThreadWatchGuard pause_watching_this_thread() = 0;
 
