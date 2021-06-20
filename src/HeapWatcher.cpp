@@ -85,6 +85,12 @@ namespace SEFUtility::HeapWatcher
                 std::this_thread::sleep_for(0.1s);
             }
 
+            //  Find out where in the stack trace the 'malloc' symbol appears
+
+            probe_for_malloc_stack_depth();
+
+            //  Find the known leak for std::thread thread local storage
+
             known_leaks_.reserve(64);
 
             //  Next, pthreads intentionally leak so we want to create one now and capture the address
@@ -107,15 +113,38 @@ namespace SEFUtility::HeapWatcher
 
         bool is_watching_globally() const { return watching_globally_; }
         bool is_watching_this_thread() const { return watching_globally_ && watching_thread_; }
-        bool is_known_leak(const void* function_address) const
+        bool is_known_leak(const void** stack_trace, size_t     trace_depth ) const
         {
-            return std::find(known_leaks_.begin(), known_leaks_.end(), function_address) != known_leaks_.end();
+            for( auto& known_leak : known_leaks_ )
+            {
+                if( known_leak.offset_from_malloc_ < trace_depth )
+                {
+                    if( std::find(known_leaks_.begin(), known_leaks_.end(), stack_trace[known_leak.offset_from_malloc_]) != known_leaks_.end() )
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
         }
 
         uint64_t capture_known_leak(std::list<std::string>& leaking_symbols,
                                     std::function<void()> function_which_leaks);
 
-        const KnownLeaks known_leaks() const { return KnownLeaks(known_leaks_); }
+        const KnownLeaks known_leaks() const
+        {
+            std::vector<const void*>    leak_addresses;
+
+            leak_addresses.reserve( known_leaks_.size() );
+
+            for( auto leak : known_leaks_ )
+            {
+                leak_addresses.emplace_back( leak.address_ );
+            }
+
+            return KnownLeaks(leak_addresses);
+        }
 
         void start_watching() final
         {
@@ -196,23 +225,21 @@ namespace SEFUtility::HeapWatcher
 
         void* instrumented_malloc(size_t size)
         {
-            constexpr size_t MALLOC_DEPTH_IN_CALL_STACK = 3;
-
             void* address = __libc_malloc(size);
 
             if (is_watching_this_thread())
             {
                 PauseThreadWatchToken pause_watching_guard;
 
-                std::array<void*, MAX_CALLSTACK_RETAINED + MALLOC_DEPTH_IN_CALL_STACK> stack_tail;
+                std::array<void*, MAX_CALLSTACK_RETAINED + MAX_MALLOC_DEPTH_IN_CALL_STACK> stack_tail;
                 stack_tail.fill(nullptr);
 
-                backtrace(stack_tail.data(), MAX_CALLSTACK_RETAINED + MALLOC_DEPTH_IN_CALL_STACK);
+                backtrace(stack_tail.data(), MAX_CALLSTACK_RETAINED + malloc_depth_in_call_stack_);
 
-                if (!is_known_leak(stack_tail.data()[MALLOC_DEPTH_IN_CALL_STACK]))
+                if (!is_known_leak(const_cast<const void**>(stack_tail.data() + malloc_depth_in_call_stack_), stack_tail.size() - malloc_depth_in_call_stack_ ))
                 {
                     worker_request_queue_.enqueue(
-                        WorkerRequest::malloc_request(size, address, &stack_tail.data()[MALLOC_DEPTH_IN_CALL_STACK]));
+                        WorkerRequest::malloc_request(size, address, &stack_tail.data()[malloc_depth_in_call_stack_]));
                 }
                 else
                 {
@@ -225,23 +252,21 @@ namespace SEFUtility::HeapWatcher
 
         void* instrumented_calloc(size_t nitems, size_t size)
         {
-            constexpr size_t CALLOC_DEPTH_IN_CALL_STACK = 3;
-
             void* address = __libc_calloc(nitems, size);
 
             if (is_watching_this_thread())
             {
                 PauseThreadWatchToken pause_watching_guard;
 
-                std::array<void*, MAX_CALLSTACK_RETAINED + CALLOC_DEPTH_IN_CALL_STACK> stack_tail;
+                std::array<void*, MAX_CALLSTACK_RETAINED + MAX_MALLOC_DEPTH_IN_CALL_STACK> stack_tail;
                 stack_tail.fill(nullptr);
 
-                backtrace(stack_tail.data(), MAX_CALLSTACK_RETAINED + CALLOC_DEPTH_IN_CALL_STACK);
+                backtrace(stack_tail.data(), MAX_CALLSTACK_RETAINED + malloc_depth_in_call_stack_);
 
-                if (!is_known_leak(stack_tail.data()[CALLOC_DEPTH_IN_CALL_STACK]))
+                if (!is_known_leak(const_cast<const void**>( stack_tail.data() + malloc_depth_in_call_stack_), stack_tail.size() - malloc_depth_in_call_stack_ ))
                 {
                     worker_request_queue_.enqueue(WorkerRequest::malloc_request(
-                        size * nitems, address, &stack_tail.data()[CALLOC_DEPTH_IN_CALL_STACK]));
+                        size * nitems, address, &stack_tail.data()[malloc_depth_in_call_stack_]));
                 }
                 else
                 {
@@ -284,22 +309,20 @@ namespace SEFUtility::HeapWatcher
 
         void* single_thread_instrumented_malloc(size_t size)
         {
-            constexpr size_t MALLOC_DEPTH_IN_CALL_STACK = 3;
-
             void* address = __libc_malloc(size);
 
             if (watching_thread_ && (std::this_thread::get_id() == watched_single_thread_id_))
             {
                 PauseThreadWatchToken pause_watching_guard;
 
-                std::array<void*, MAX_CALLSTACK_RETAINED + MALLOC_DEPTH_IN_CALL_STACK> stack_tail;
+                std::array<void*, MAX_CALLSTACK_RETAINED + MAX_MALLOC_DEPTH_IN_CALL_STACK> stack_tail;
                 stack_tail.fill(nullptr);
 
-                backtrace(stack_tail.data(), MAX_CALLSTACK_RETAINED + MALLOC_DEPTH_IN_CALL_STACK);
+                backtrace(stack_tail.data(), MAX_CALLSTACK_RETAINED + malloc_depth_in_call_stack_);
 
                 single_threaded_allocations_.emplace(std::make_pair(
                     address,
-                    AllocationRecord(size, address, get_txn_id(), &stack_tail.data()[MALLOC_DEPTH_IN_CALL_STACK])));
+                    AllocationRecord(size, address, get_txn_id(), &stack_tail.data()[malloc_depth_in_call_stack_])));
             }
 
             return address;
@@ -307,22 +330,20 @@ namespace SEFUtility::HeapWatcher
 
         void* single_thread_instrumented_calloc(size_t nitems, size_t size)
         {
-            constexpr size_t CALLOC_DEPTH_IN_CALL_STACK = 3;
-
             void* address = __libc_calloc(nitems, size);
 
             if (watching_thread_ && (std::this_thread::get_id() == watched_single_thread_id_))
             {
                 PauseThreadWatchToken pause_watching_guard;
 
-                std::array<void*, MAX_CALLSTACK_RETAINED + CALLOC_DEPTH_IN_CALL_STACK> stack_tail;
+                std::array<void*, MAX_CALLSTACK_RETAINED + MAX_MALLOC_DEPTH_IN_CALL_STACK> stack_tail;
                 stack_tail.fill(nullptr);
 
-                backtrace(stack_tail.data(), MAX_CALLSTACK_RETAINED + CALLOC_DEPTH_IN_CALL_STACK);
+                backtrace(stack_tail.data(), MAX_CALLSTACK_RETAINED + malloc_depth_in_call_stack_);
 
                 single_threaded_allocations_.emplace(std::make_pair(
                     address,
-                    AllocationRecord(size, address, get_txn_id(), &stack_tail.data()[CALLOC_DEPTH_IN_CALL_STACK])));
+                    AllocationRecord(size, address, get_txn_id(), &stack_tail.data()[malloc_depth_in_call_stack_])));
             }
 
             return address;
@@ -335,8 +356,6 @@ namespace SEFUtility::HeapWatcher
             if (watching_thread_ && (std::this_thread::get_id() == watched_single_thread_id_))
             {
                 PauseThreadWatchToken pause_watching_guard;
-
-                std::cout << "single thread realloc: " << original_address << "  " << new_address << std::endl;
 
                 if (auto prior_allocation_itr = allocations_.find(original_address);
                     prior_allocation_itr != allocations_.end())
@@ -369,6 +388,8 @@ namespace SEFUtility::HeapWatcher
         //   Data Members
         //
 
+        static constexpr size_t MAX_MALLOC_DEPTH_IN_CALL_STACK = 3;
+
         struct LargeTraits : public moodycamel::ConcurrentQueueDefaultTraits
         {
             static const size_t BLOCK_SIZE = 128;
@@ -395,7 +416,26 @@ namespace SEFUtility::HeapWatcher
         std::map<const void*, AllocationRecord> allocations_;
         std::unordered_set<void*> frees_without_mallocs_;
 
-        std::vector<const void*> known_leaks_;
+        struct LeakAddressAndOffset
+        {
+            LeakAddressAndOffset( const void*       address,
+                                  int               offset )
+                : address_( address ),
+                  offset_from_malloc_( offset )
+            {}
+
+            bool operator==( const void*        address ) const
+            {
+                return address_ == address;
+            }
+
+            const void*         address_;
+            const int           offset_from_malloc_;
+        };
+
+        std::vector<LeakAddressAndOffset> known_leaks_;
+
+        size_t malloc_depth_in_call_stack_{0};
 
         uint64_t number_of_mallocs_{0};
         uint64_t number_of_reallocs_{0};
@@ -451,6 +491,8 @@ namespace SEFUtility::HeapWatcher
             const bool saved_value_;
         };
 
+        void probe_for_malloc_stack_depth();
+
         //
         //  'Main' function for tracking allocations
         //
@@ -475,6 +517,64 @@ namespace SEFUtility::HeapWatcher
     //
     //  HeapWatcherImpl implementation
     //
+
+    void single_leak_probe_function(void*& leaked_memory) { leaked_memory = malloc(16); }
+
+    void HeapWatcherImpl::probe_for_malloc_stack_depth()
+    {
+        //  Clear the record of allocations, then launch a separate thread within which we
+        //      set the thread id and then swap in the single thread instrumented functions
+        //      and then run the leaking code.  After the leaking code finishes, we yank out
+        //      the instrumented functions.
+
+        void* leaked_memory;
+
+        single_threaded_allocations_.clear();
+
+        watched_single_thread_id_ = std::this_thread::get_id();
+
+        set_single_threaded_instrumentation();
+
+        {
+            single_leak_probe_function(leaked_memory);
+        }
+
+        remove_instrumentation();
+
+        //  Free the probe memory we leaked.
+
+        free(leaked_memory);
+
+        //  There should be only a single leak
+
+        assert(single_threaded_allocations_.size() == 1);
+
+        std::vector<const void*> leak_stack_trace;
+
+        leak_stack_trace.reserve(single_threaded_allocations_.begin()->second.raw_stack_trace().size());
+
+        for (auto address : single_threaded_allocations_.begin()->second.raw_stack_trace())
+        {
+            leak_stack_trace.emplace_back(address);
+        }
+
+        auto leak_symbols = symbols_for_addresses(leak_stack_trace);
+
+        //  Find 'malloc' in the stack trace
+
+        for (int i = 0; i < leak_symbols.size(); i++)
+        {
+            if (leak_symbols[i].function() == "malloc")
+            {
+                malloc_depth_in_call_stack_ = i + 1;
+                break;
+            }
+        }
+
+        //  Clear the single threaded leak collection
+
+        single_threaded_allocations_.clear();
+    }
 
     uint64_t HeapWatcherImpl::capture_known_leak(std::list<std::string>& leaking_symbols,
                                                  std::function<void()> function_which_leaks)
@@ -516,30 +616,34 @@ namespace SEFUtility::HeapWatcher
 
         leaks_found.reserve(single_threaded_allocations_.size());
 
-        for (auto leak : single_threaded_allocations_)
-        {
-            leaks_found.emplace_back(leak.second.raw_stack_trace()[0]);
-        }
+//        for (auto leak : single_threaded_allocations_)
+//        {
+//            leaks_found.emplace_back(leak.second.raw_stack_trace()[0]);
+//        }
 
-        auto leaking_symbols_found = symbols_for_addresses(leaks_found);
+//        auto leaking_symbols_found = symbols_for_addresses(leaks_found);
 
         //  Finally, pass through the leaks and we will only keep those that match names
         //      passed into the function.
 
-        int i = 0;
         int number_of_leaks_found = 0;
         for (auto leak : single_threaded_allocations_)
         {
-            if (!is_known_leak(leak.second.raw_stack_trace()[0]))
+            auto leaking_stack_trace =  leak.second.stack_trace();
+
+            if (!is_known_leak(const_cast<const void**>(leak.second.raw_stack_trace().data()), leak.second.raw_stack_trace().size()))
             {
-                if (std::find(leaking_symbols.begin(), leaking_symbols.end(), leaking_symbols_found[i].function()) !=
-                    leaking_symbols.end())
+                for( auto offset = 0; offset < leaking_stack_trace.size(); offset++ )
                 {
-                    known_leaks_.emplace_back(leak.second.raw_stack_trace()[0]);
-                    number_of_leaks_found++;
+                    if (std::find(leaking_symbols.begin(), leaking_symbols.end(), leaking_stack_trace[offset].function()) !=
+                        leaking_symbols.end())
+                    {
+                        known_leaks_.emplace_back(LeakAddressAndOffset( leak.second.raw_stack_trace()[offset], offset ));
+                        number_of_leaks_found++;
+                        break;
+                    }
                 }
             }
-            i++;
         }
 
         //  Clear the single threaded leak collection and return the number of leaks we found and filtered.
@@ -690,22 +794,22 @@ namespace SEFUtility::HeapWatcher
 //  Wrapper functions used to redirect calls to the heap functions through function pointers
 //
 
-void* __attribute__((noinline)) heapwatcher_instrumented_malloc(size_t size)
+void* heapwatcher_instrumented_malloc(size_t size)
 {
     return SEFUtility::HeapWatcher::heap_watcher_.instrumented_malloc(size);
 }
 
-void* __attribute__((noinline)) heapwatcher_instrumented_calloc(size_t nitems, size_t size)
+void* heapwatcher_instrumented_calloc(size_t nitems, size_t size)
 {
     return SEFUtility::HeapWatcher::heap_watcher_.instrumented_calloc(nitems, size);
 }
 
-void* __attribute__((noinline)) heapwatcher_instrumented_realloc(void* address, size_t size)
+void* heapwatcher_instrumented_realloc(void* address, size_t size)
 {
     return SEFUtility::HeapWatcher::heap_watcher_.instrumented_realloc(address, size);
 }
 
-void __attribute__((noinline)) heapwatcher_instrumented_free(void* address)
+void heapwatcher_instrumented_free(void* address)
 {
     return SEFUtility::HeapWatcher::heap_watcher_.instrumented_free(address);
 }
@@ -714,22 +818,22 @@ void __attribute__((noinline)) heapwatcher_instrumented_free(void* address)
 //  Wrapper functions used to redirect calls to the heap functions through function pointers
 //
 
-void* __attribute__((noinline)) heapwatcher_single_thread_instrumented_malloc(size_t size)
+void* heapwatcher_single_thread_instrumented_malloc(size_t size)
 {
     return SEFUtility::HeapWatcher::heap_watcher_.single_thread_instrumented_malloc(size);
 }
 
-void* __attribute__((noinline)) heapwatcher_single_thread_instrumented_calloc(size_t nitems, size_t size)
+void* heapwatcher_single_thread_instrumented_calloc(size_t nitems, size_t size)
 {
     return SEFUtility::HeapWatcher::heap_watcher_.single_thread_instrumented_calloc(nitems, size);
 }
 
-void* __attribute__((noinline)) heapwatcher_single_thread_instrumented_realloc(void* address, size_t size)
+void* heapwatcher_single_thread_instrumented_realloc(void* address, size_t size)
 {
     return SEFUtility::HeapWatcher::heap_watcher_.single_thread_instrumented_realloc(address, size);
 }
 
-void __attribute__((noinline)) heapwatcher_single_thread_instrumented_free(void* address)
+void heapwatcher_single_thread_instrumented_free(void* address)
 {
     return SEFUtility::HeapWatcher::heap_watcher_.single_thread_instrumented_free(address);
 }
@@ -737,23 +841,25 @@ void __attribute__((noinline)) heapwatcher_single_thread_instrumented_free(void*
 //
 //  Overrides of the C heap functions follow
 //
+//  We do not want these inlined so that we can identify the depth in the call stack that we
+//      can ignore for allocations.
+//
 
-void* __attribute__((noinline)) malloc(size_t size)
-{
-    return SEFUtility::HeapWatcher::HeapWatcherImpl::malloc_function_.load()(size);
-}
+#pragma GCC push_options
+#pragma GCC optimize("O0")
 
-void* __attribute__((noinline)) calloc(size_t nitems, size_t size)
+void* malloc(size_t size) { return SEFUtility::HeapWatcher::HeapWatcherImpl::malloc_function_.load()(size); }
+
+void* calloc(size_t nitems, size_t size)
 {
     return SEFUtility::HeapWatcher::HeapWatcherImpl::calloc_function_.load()(nitems, size);
 }
 
-void* __attribute__((noinline)) realloc(void* address, size_t size)
+void* realloc(void* address, size_t size)
 {
     return SEFUtility::HeapWatcher::HeapWatcherImpl::realloc_function_.load()(address, size);
 }
 
-void __attribute__((noinline)) free(void* address)
-{
-    return SEFUtility::HeapWatcher::HeapWatcherImpl::free_function_.load()(address);
-}
+void free(void* address) { return SEFUtility::HeapWatcher::HeapWatcherImpl::free_function_.load()(address); }
+
+#pragma gcc pop_options

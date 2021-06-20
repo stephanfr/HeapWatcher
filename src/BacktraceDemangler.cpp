@@ -68,10 +68,23 @@ namespace SEFUtility::HeapWatcher
 
         tail_records.reserve(addresses.size() + 1);
 
-        //  Get the symbols - this is an array of mangled strings.  If this fails,
-        //      return the currently empty list
+        //  Determine the number of addresses to demangle, this could be less than the
+        //      size of the array.
 
-        char** backtrace_lines(backtrace_symbols(const_cast<void* const*>(addresses.data()), addresses.size()));
+        int num_addresses = 0;
+
+        for( ; num_addresses < addresses.size(); num_addresses++ )
+        {
+            if( addresses.data()[num_addresses] == nullptr )
+            {
+                break;
+            }
+        }
+
+        //  Get the symbols - this is an array of mangled strings.  If this fails,
+        //      return the currently empty list.
+
+        char** backtrace_lines(backtrace_symbols(const_cast<void* const*>(addresses.data()), num_addresses));
 
         if (backtrace_lines == NULL)
         {
@@ -79,7 +92,7 @@ namespace SEFUtility::HeapWatcher
             return tail_records;
         }
 
-        for (int i = 0; i < addresses.size(); i++)
+        for (int i = 0; i < num_addresses; i++)
         {
             tail_records.emplace_back(std::move(decode_mangled_line(backtrace_lines[i])));
         }

@@ -5,6 +5,9 @@
 constexpr size_t NUMBER_OF_LONGS_IN_ONE_CALLOC_LEAK = 9;
 
 void KnownLeak();
+void KnownLeak2();
+void NestedKnownLeak2();
+
 void NoLeaks();
 void OneLeak();
 void OneLeakNested();

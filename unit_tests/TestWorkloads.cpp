@@ -20,9 +20,13 @@ void NoLeaks()
     free(new_int);          //  NOLINT(cppcoreguidelines-no-malloc,cppcoreguidelines-owning-memory,hicpp-no-malloc)
 }
 
-void KnownLeak() { int* new_int = static_cast<int*>(malloc(sizeof(int))); }   //  NOLINT
+void KnownLeak() { int* new_int = static_cast<int*>(malloc(sizeof(uint64_t))); }   //  NOLINT
 
-void OneLeak() { int* new_int = static_cast<int*>(malloc(sizeof(int))); }   //  NOLINT
+void KnownLeak2() { int* new_int = static_cast<int*>(malloc(2 * sizeof(uint64_t))); }   //  NOLINT
+
+void NestedKnownLeak2() { KnownLeak2(); }   //  NOLINT
+
+void OneLeak() { int* new_int = static_cast<int*>(malloc(sizeof(uint32_t))); }   //  NOLINT
 
 void OneLeakNested() { OneLeak(); }
 

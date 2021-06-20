@@ -76,7 +76,7 @@ TEST_CASE("Basic HeapWatcher Tests", "[basic]")
         REQUIRE(leaks.high_level_statistics().number_of_mallocs() == 1);
         REQUIRE(leaks.high_level_statistics().number_of_frees() == 0);
         REQUIRE(leaks.high_level_statistics().number_of_reallocs() == 0);
-        REQUIRE(leaks.high_level_statistics().bytes_allocated() == sizeof(int));
+        REQUIRE(leaks.high_level_statistics().bytes_allocated() == sizeof(uint32_t));
         REQUIRE(leaks.high_level_statistics().bytes_freed() == 0);
     }
 
@@ -195,6 +195,32 @@ TEST_CASE("Basic HeapWatcher Tests", "[basic]")
         auto leaks(SEFUtility::HeapWatcher::get_heap_watcher().stop_watching());
 
         REQUIRE(leaks.open_allocations().size() == 2);
+    }
+
+    SECTION("Nested Known Leak", "[basic]")
+    {
+        std::list<std::string> leaking_symbol({"NestedKnownLeak2()"});
+
+        REQUIRE( SEFUtility::HeapWatcher::get_heap_watcher().capture_known_leak(leaking_symbol, []() { NestedKnownLeak2(); }) == 1 );
+
+        REQUIRE(SEFUtility::HeapWatcher::get_heap_watcher().known_leaks().addresses().size() == 3);
+        REQUIRE_THAT(SEFUtility::HeapWatcher::get_heap_watcher().known_leaks().symbols()[0].function(),
+                     Catch::Matchers::Equals("_dl_allocate_tls"));
+        REQUIRE_THAT(SEFUtility::HeapWatcher::get_heap_watcher().known_leaks().symbols()[1].function(),
+                     Catch::Matchers::Equals("KnownLeak()"));
+        REQUIRE_THAT(SEFUtility::HeapWatcher::get_heap_watcher().known_leaks().symbols()[2].function(),
+                     Catch::Matchers::Equals("NestedKnownLeak2()"));
+
+        SEFUtility::HeapWatcher::get_heap_watcher().start_watching();
+
+        OneLeakNested();
+        NestedKnownLeak2();
+        KnownLeak2();
+        OneLeak();
+
+        auto leaks(SEFUtility::HeapWatcher::get_heap_watcher().stop_watching());
+
+        REQUIRE(leaks.open_allocations().size() == 3);
     }
 
     SECTION("Many Allocations No Leaks", "[basic]")
