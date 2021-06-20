@@ -50,6 +50,9 @@ namespace SEFUtility::HeapWatcher
         virtual void start_watching() = 0;
         virtual HeapSnapshot stop_watching() = 0;
 
+        virtual uint64_t capture_known_leak(std::list<std::string>& leaking_symbols, std::function<void()> function_which_leaks) = 0;
+        [[nodiscard]] virtual const KnownLeaks known_leaks() const = 0;
+
         [[nodiscard]] virtual PauseThreadWatchGuard pause_watching_this_thread() = 0;
 
         [[nodiscard]] virtual const HeapSnapshot snapshot() = 0;
@@ -93,6 +96,40 @@ TEST_CASE("Basic HeapWatcher Tests", "[basic]")
     }
 }
 ````
+
+# Capturing Known Leaks
+
+In various third party libraries there exist intentional leaks.  A good example is the leak of a pointer for thread local storage for each thread created by the pthread library.  There is a leak from the symbol _dl_allocate_tls_ that appears to remain even after std::thread::join() is called.  This appears not infrequently in Valgrind reports as well.  Given the desire to make this a library for automated testing, I added the capability to capture and then ignore allocations from certain functions or methods.  An example appears below:
+
+````
+    SECTION("Known Leak", "[basic]")
+    {
+        std::list<std::string> leaking_symbol({"KnownLeak()"});
+
+        REQUIRE( SEFUtility::HeapWatcher::get_heap_watcher().capture_known_leak(leaking_symbol, []() { KnownLeak(); }) == 1 );
+
+        REQUIRE(SEFUtility::HeapWatcher::get_heap_watcher().known_leaks().addresses().size() == 2);
+        REQUIRE_THAT(SEFUtility::HeapWatcher::get_heap_watcher().known_leaks().symbols()[0].function(),
+                     Catch::Matchers::Equals("_dl_allocate_tls"));
+        REQUIRE_THAT(SEFUtility::HeapWatcher::get_heap_watcher().known_leaks().symbols()[1].function(),
+                     Catch::Matchers::Equals("KnownLeak()"));
+
+        SEFUtility::HeapWatcher::get_heap_watcher().start_watching();
+
+        OneLeakNested();
+        KnownLeak();
+        OneLeak();
+
+        auto leaks(SEFUtility::HeapWatcher::get_heap_watcher().stop_watching());
+
+        REQUIRE(leaks.open_allocations().size() == 2);
+    }
+````
+
+The capture_known_leak() method takes two arguments: 1) a std::list<std::string> containing one or more symbols which if located in a stack trace will cause the allocation associated with the trace to be ignored and 2) a function (or lambda) which will evoke one or more leaks associated with the symbols passed in the first argument.  The leaking function need not be just adjacent to the malloc, it may be further up the call stack but the allocation will only be ignored if it appears at the same number of frames above the memory allocation as at the time the leak was captured.
+
+This approach of actively capturing the leak at runtime is effective for dealing with ASLR (Address Space Layout Randomization) and does not require loading of shared libraries or other linking or loading gymnastics.
+
 
 # Pausing Allocation Tracking
 
