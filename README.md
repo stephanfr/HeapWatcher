@@ -4,7 +4,7 @@ This project provides a simple tool for tracking heap allocations between start/
 
 # Design
 
-The C standard library functions of _malloc()_, _realloc()_ and _free()_ can be replaced by user-supplied replacements with the same names and signatures supplied in a user static library or shared object.  This tool wraps the c standard library calls and then tracks all allocations and frees in a map.  The 'bookkeeping' is performed in a separate thread to (1) limit the need for mutexes or critical sections to protect shared state and (2) limit the run-time performance impact on the code under test.  Allocation tracking can be paused in any thread being tracked.
+The C standard library functions of _malloc()_, _realloc()_ and _free()_ can be replaced by user-supplied replacements with the same names and signatures supplied in a user static library or shared object (https://www.gnu.org/software/libc/manual/html_node/Replacing-malloc.html).  This tool wraps the c standard library calls and then tracks all allocations and frees in a map.  The 'bookkeeping' is performed in a separate thread to (1) limit the need for mutexes or critical sections to protect shared state and (2) limit the run-time performance impact on the code under test.  Allocation tracking can be paused in any thread being tracked.
 
 There exists a single global static instance of HeapWatcher which can be accessed with the _SEFUtility::HeapWatcher::get_heap_watcher()_ function.
 
