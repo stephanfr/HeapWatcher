@@ -149,5 +149,59 @@ The _PauseThreadWatchGuard_ instance returned by a call to _HeapWatcher::pause_w
         REQUIRE(leaks.open_allocations().size() == 0);
 ````
 
-    
+# Test Fixtures
+
+Two test fixtures are included with HeapWatcher and both are intended to ease the creation of multi-threaded unit test cases, which are useful for detecting race conditions or dead locks. The test fixtures feature the ability to add functions or lambdas for ‘workload functions’ and then start all of those ‘workload functions’ simultaneously. Alternatively, ‘workload functions’ may be given a random start delay in seconds (as a double so it may be fractions of a second as well). This permits stress testing with a lot of load started at one time or allows for load to ramp over time.
+
+The SEFUtility::HeapWatcher::ScopedMultithreadedTestFixture class starts watching the heap on creation and takes a function or lambda which will be called with a HeapSnapshot when all threads have completed, to permit testing the final heap state. This test fixture effectively hides the HeapWatcher instructions whereas the SEFUtility::HeapWatcher::MultithreadedTestFixture class requires the user to wrap the test fixture with the HeapWatcher start and stop.
+
+Examples of both test fixtures appear below. First is an example of MultithreadedTestFixture :
+
+````
+SECTION("Torture Test, One Leak", "[basic]")
+{
+    constexpr int64_t num_operations = 2000000;
+    constexpr int NUM_WORKERS = 20;
+ 
+    SEFUtility::HeapWatcher::MultithreadedTestFixture test_fixture;
+ 
+    SEFUtility::HeapWatcher::get_heap_watcher().start_watching();
+ 
+    test_fixture.add_workload(NUM_WORKERS,
+                              std::bind(&RandomHeapOperations, num_operations));  //  NOLINT(modernize-avoid-bind)
+    test_fixture.add_workload(1, &OneLeak);
+ 
+    std::this_thread::sleep_for(10s);
+ 
+    test_fixture.start_workload();
+    test_fixture.wait_for_completion();
+ 
+    auto leaks = SEFUtility::HeapWatcher::get_heap_watcher().stop_watching();
+ 
+    REQUIRE(leaks.open_allocations().size() == 1);
+}
+````
+
+An example of ScopedMultiThreadedTestFixture follows :
+
+````
+SECTION("Two Workloads, Few Threads, one Leak", "[basic]")
+{
+    constexpr int NUM_WORKERS = 5;
+ 
+    SEFUtility::HeapWatcher::ScopedMultithreadedTestFixture test_fixture(
+        [](const SEFUtility::HeapWatcher::HeapSnapshot& snapshot) { REQUIRE(snapshot.numberof_leaks() == 5); });
+ 
+    test_fixture.add_workload(NUM_WORKERS, &BuildBigMap);
+    test_fixture.add_workload(NUM_WORKERS, &OneLeak);
+ 
+    std::this_thread::sleep_for(1s);
+ 
+    test_fixture.start_workload();
+}
+````
+
+# Conclusion
+
+HeapWatcher and the multithreaded test fixture classes are intended to help developers create tests which check for memory leaks either in simple procedural test cases written with GoogleTest or Catch2 or in more complex multi-threaded tests in those same base frameworks.
 
